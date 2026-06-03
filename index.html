@@ -1,0 +1,845 @@
+<!DOCTYPE html>
+<html lang="sv">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0"/>
+<title>Bilresespel 🚌</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fredoka+One&family=Nunito:wght@400;700&display=swap"/>
+<style>
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
+  body{margin:0;background:#1a1a2e;color:#eaeaea;font-family:'Nunito',sans-serif;min-height:100vh;}
+  button{font-family:'Nunito',sans-serif;}
+  input{outline:none;}
+  canvas{touch-action:none;}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
+<script type="text/babel">
+const { useState, useEffect, useRef } = React;
+
+const theme = {
+  bg:"#1a1a2e",card:"#16213e",accent:"#e94560",gold:"#f5a623",
+  green:"#27ae60",blue:"#3498db",purple:"#9b59b6",
+  text:"#eaeaea",muted:"#8892b0",
+  font:"'Fredoka One',cursive",body:"'Nunito',sans-serif",
+};
+
+function shuffle(arr){
+  const a=[...arr];
+  for(let i=a.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]];}
+  return a;
+}
+
+function btnStyle(color,full=true){
+  return{background:color,border:"none",borderRadius:12,padding:"12px 24px",color:"#fff",fontFamily:theme.font,
+    fontSize:16,cursor:"pointer",display:full?"block":"inline-block",width:full?"100%":"auto",marginTop:8,
+    boxShadow:`0 4px 12px ${color}55`};
+}
+
+const games=[
+  {id:"hangman",label:"Hänga Gubbe",emoji:"🪢",color:"#e94560"},
+  {id:"tictactoe",label:"Tre i Rad",emoji:"✖️",color:"#3498db"},
+  {id:"quiz",label:"Quiz",emoji:"🧠",color:"#9b59b6"},
+  {id:"memory",label:"Memory",emoji:"🃏",color:"#f5a623"},
+  {id:"wordchain",label:"Ordkedja",emoji:"🔗",color:"#27ae60"},
+  {id:"counting",label:"Räkna Fordon",emoji:"🚗",color:"#e67e22"},
+  {id:"riddle",label:"Gåtor",emoji:"🤔",color:"#1abc9c"},
+  {id:"drawing",label:"Rita & Gissa",emoji:"✏️",color:"#e91e63"},
+  {id:"trivia20",label:"20 Frågor",emoji:"💬",color:"#00bcd4"},
+  {id:"snake",label:"Orm",emoji:"🐍",color:"#2ecc71"},
+  {id:"tetris",label:"Tetris",emoji:"🟦",color:"#8e44ad"},
+  {id:"bingo",label:"Vägbingo",emoji:"🎯",color:"#e67e22"},
+];
+
+function HomeScreen({onSelect,scores}){
+  return(
+    <div style={{padding:"16px",maxWidth:480,margin:"0 auto"}}>
+      <div style={{textAlign:"center",marginBottom:24}}>
+        <div style={{fontSize:48}}>🚌</div>
+        <h1 style={{fontFamily:theme.font,color:theme.gold,fontSize:28,margin:"4px 0"}}>Bilresespel!</h1>
+        <p style={{color:theme.muted,fontFamily:theme.body,fontSize:14}}>Skåne → Järrestad • Välj ett spel</p>
+      </div>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10}}>
+        {games.map(g=>(
+          <button key={g.id} onClick={()=>onSelect(g.id)} style={{
+            background:g.color+"22",border:`2px solid ${g.color}`,borderRadius:16,padding:"14px 8px",
+            cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",gap:6,color:theme.text,
+          }}>
+            <span style={{fontSize:28}}>{g.emoji}</span>
+            <span style={{fontFamily:theme.font,fontSize:12,color:g.color,textAlign:"center"}}>{g.label}</span>
+            {scores[g.id]!==undefined&&<span style={{fontSize:10,color:theme.muted}}>⭐ {scores[g.id]}p</span>}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function GameWrapper({title,emoji,color,onBack,children}){
+  return(
+    <div style={{maxWidth:480,margin:"0 auto",padding:16}}>
+      <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:16}}>
+        <button onClick={onBack} style={{background:"none",border:`2px solid ${theme.muted}`,borderRadius:10,color:theme.muted,padding:"6px 12px",cursor:"pointer"}}>← Hem</button>
+        <h2 style={{fontFamily:theme.font,color,margin:0,fontSize:22}}>{emoji} {title}</h2>
+      </div>
+      {children}
+    </div>
+  );
+}
+
+// ===== HÄNGA GUBBE =====
+const hangmanWords=["JÄRRESTAD","SIMRISHAMN","SKÅNE","BILEN","SEMESTERN","GLASS","STRANDEN","SOMMAR","FAMILJEN","LEKPLATS","VIKING","KRABBA","FISKEBÅT","SOLNEDGÅNG","KLIPPORNA","VÄGSKYLTEN","RASTPLATS","BENSINMACK","TRAFIKLJUS","MOTORVÄGEN"];
+const HSTAGES=[
+`  +---+\n  |   |\n      |\n      |\n      |\n      |\n=========`,
+`  +---+\n  |   |\n  O   |\n      |\n      |\n      |\n=========`,
+`  +---+\n  |   |\n  O   |\n  |   |\n      |\n      |\n=========`,
+`  +---+\n  |   |\n  O   |\n /|   |\n      |\n      |\n=========`,
+`  +---+\n  |   |\n  O   |\n /|\\  |\n      |\n      |\n=========`,
+`  +---+\n  |   |\n  O   |\n /|\\  |\n /    |\n      |\n=========`,
+`  +---+\n  |   |\n  O   |\n /|\\  |\n / \\  |\n      |\n=========`,
+];
+function HangmanGame({onScore}){
+  const [word,setWord]=useState(()=>shuffle(hangmanWords)[0]);
+  const [guessed,setGuessed]=useState([]);
+  const [wrong,setWrong]=useState(0);
+  const [won,setWon]=useState(false);
+  const [lost,setLost]=useState(false);
+  const letters="ABCDEFGHIJKLMNOPQRSTUVWXYZÅÄÖ".split("");
+  const displayWord=word.split("").map(l=>guessed.includes(l)?l:"_").join(" ");
+  const remaining=wrong<6&&!won;
+  function guess(l){
+    if(guessed.includes(l)||!remaining)return;
+    const ng=[...guessed,l];setGuessed(ng);
+    if(!word.includes(l)){const nw=wrong+1;setWrong(nw);if(nw>=6)setLost(true);}
+    else if(word.split("").every(c=>ng.includes(c))){setWon(true);onScore(6-wrong);}
+  }
+  function reset(){setWord(shuffle(hangmanWords)[0]);setGuessed([]);setWrong(0);setWon(false);setLost(false);}
+  return(
+    <div>
+      <pre style={{fontFamily:"monospace",color:wrong>=6?theme.accent:theme.text,background:"#0d1117",borderRadius:12,padding:16,fontSize:14,lineHeight:1.4,textAlign:"center"}}>{HSTAGES[wrong]}</pre>
+      <div style={{textAlign:"center",margin:"16px 0"}}>
+        <div style={{fontFamily:"monospace",fontSize:28,letterSpacing:8,color:won?theme.green:theme.text}}>{displayWord}</div>
+        <div style={{color:theme.muted,fontSize:13,marginTop:8}}>{wrong}/6 felgissningar</div>
+      </div>
+      {(won||lost)?(
+        <div style={{textAlign:"center"}}>
+          <div style={{fontSize:36}}>{won?"🎉":"💀"}</div>
+          <div style={{color:won?theme.green:theme.accent,fontFamily:theme.font,fontSize:20}}>{won?`Rätt! +${6-wrong} poäng`:`Ordet var: ${word}`}</div>
+          <button onClick={reset} style={btnStyle(theme.blue)}>Nytt ord</button>
+        </div>
+      ):(
+        <div style={{display:"flex",flexWrap:"wrap",gap:6,justifyContent:"center"}}>
+          {letters.map(l=>(
+            <button key={l} onClick={()=>guess(l)} disabled={guessed.includes(l)} style={{
+              width:38,height:38,borderRadius:8,border:`2px solid ${guessed.includes(l)?"#333":theme.accent}`,
+              background:guessed.includes(l)?(word.includes(l)?theme.green+"33":"#333"):theme.accent+"22",
+              color:guessed.includes(l)?theme.muted:theme.text,fontFamily:theme.font,fontSize:14,cursor:guessed.includes(l)?"default":"pointer",
+            }}>{l}</button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ===== TRE I RAD =====
+function TicTacToeGame({onScore}){
+  const [board,setBoard]=useState(Array(9).fill(null));
+  const [xIsNext,setXIsNext]=useState(true);
+  const [scored,setScored]=useState(false);
+  function calcWinner(b){
+    const lines=[[0,1,2],[3,4,5],[6,7,8],[0,3,6],[1,4,7],[2,5,8],[0,4,8],[2,4,6]];
+    for(const[a,c,d]of lines)if(b[a]&&b[a]===b[c]&&b[a]===b[d])return{winner:b[a],line:[a,c,d]};
+    return null;
+  }
+  const result=calcWinner(board);const draw=!result&&board.every(Boolean);
+  function click(i){
+    if(board[i]||result)return;
+    const nb=[...board];nb[i]=xIsNext?"✖":"○";setBoard(nb);setXIsNext(!xIsNext);
+    const r=calcWinner(nb);if(r&&!scored){onScore(3);setScored(true);}
+  }
+  function reset(){setBoard(Array(9).fill(null));setXIsNext(true);setScored(false);}
+  const wl=result?.line||[];
+  return(
+    <div style={{textAlign:"center"}}>
+      <div style={{color:theme.text,fontFamily:theme.font,fontSize:18,marginBottom:12}}>{result?`${result.winner} vann! 🎉`:draw?"Oavgjort! 🤝":`${xIsNext?"✖":"○"}:s tur`}</div>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8,maxWidth:240,margin:"0 auto 16px"}}>
+        {board.map((cell,i)=>(
+          <button key={i} onClick={()=>click(i)} style={{height:72,borderRadius:14,border:`3px solid ${wl.includes(i)?theme.gold:"#333"}`,background:wl.includes(i)?theme.gold+"22":theme.card,fontSize:32,cursor:cell||result?"default":"pointer",color:cell==="✖"?theme.accent:theme.blue}}>{cell}</button>
+        ))}
+      </div>
+      {(result||draw)&&<button onClick={reset} style={btnStyle(theme.green)}>Spela igen</button>}
+    </div>
+  );
+}
+
+// ===== QUIZ =====
+const quizQ=[
+  {q:"Vad heter Sveriges huvudstad?",a:"Stockholm",opts:["Göteborg","Malmö","Stockholm","Uppsala"]},
+  {q:"Hur många ben har en spindel?",a:"8",opts:["6","8","10","12"]},
+  {q:"Vilket land är störst i världen?",a:"Ryssland",opts:["Kina","USA","Ryssland","Kanada"]},
+  {q:"Vad heter havet söder om Sverige?",a:"Östersjön",opts:["Nordsjön","Atlanten","Östersjön","Medelhavet"]},
+  {q:"Hur många dagar i februari skottår?",a:"29",opts:["28","29","30","31"]},
+  {q:"Vilken planet är närmast solen?",a:"Merkurius",opts:["Venus","Mars","Merkurius","Jupiter"]},
+  {q:"Vad är 7 × 8?",a:"56",opts:["48","54","56","64"]},
+  {q:"Australiens nationalsymbol?",a:"Känguru",opts:["Koala","Känguru","Wombat","Emu"]},
+  {q:"Hur lång är en fotbollsmatch?",a:"90 min",opts:["60 min","80 min","90 min","120 min"]},
+  {q:"Världens längsta flod?",a:"Nilen",opts:["Amazonas","Nilen","Yangtzé","Mississippi"]},
+  {q:"Hur många färger har regnbågen?",a:"7",opts:["5","6","7","8"]},
+  {q:"Pippis häst heter?",a:"Lansen",opts:["Blanken","Lansen","Hästen","Gubben"]},
+  {q:"Första världskrigets startår?",a:"1914",opts:["1912","1914","1916","1918"]},
+  {q:"Sekunder på en minut?",a:"60",opts:["60","100","50","120"]},
+  {q:"Vilket år reste man första gången till månen?",a:"1969",opts:["1965","1967","1969","1972"]},
+];
+function QuizGame({onScore}){
+  const [qs]=useState(()=>shuffle(quizQ).slice(0,8));
+  const [idx,setIdx]=useState(0);const [sel,setSel]=useState(null);
+  const [pts,setPts]=useState(0);const [done,setDone]=useState(false);
+  const q=qs[idx];
+  function pick(opt){
+    if(sel)return;setSel(opt);
+    const correct=opt===q.a;const np=correct?pts+1:pts;setPts(np);
+    setTimeout(()=>{if(idx+1>=qs.length){setDone(true);onScore(np);}else{setIdx(idx+1);setSel(null);}},1000);
+  }
+  if(done)return(<div style={{textAlign:"center"}}><div style={{fontSize:48}}>{pts>=6?"🏆":pts>=4?"😊":"📚"}</div><div style={{fontFamily:theme.font,fontSize:24,color:theme.gold}}>{pts}/{qs.length} rätt!</div></div>);
+  return(
+    <div>
+      <div style={{color:theme.muted,fontSize:13,marginBottom:8}}>Fråga {idx+1}/{qs.length} • {pts} poäng</div>
+      <div style={{background:theme.card,borderRadius:16,padding:20,fontFamily:theme.font,fontSize:20,color:theme.text,marginBottom:16,lineHeight:1.4}}>{q.q}</div>
+      <div style={{display:"flex",flexDirection:"column",gap:10}}>
+        {shuffle(q.opts).map(opt=>{
+          let bg=theme.card,border="#444";
+          if(sel){if(opt===q.a){bg=theme.green+"44";border=theme.green;}else if(opt===sel){bg=theme.accent+"44";border=theme.accent;}}
+          return(<button key={opt} onClick={()=>pick(opt)} style={{background:bg,border:`2px solid ${border}`,borderRadius:12,padding:"14px 16px",color:theme.text,fontSize:16,textAlign:"left",cursor:sel?"default":"pointer"}}>{opt}</button>);
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ===== MEMORY =====
+const memojis=["🚗","🏖️","🌊","🦀","⛵","🌅","🦋","🐟","🌸","🍦","🎡","🏔️"];
+function MemoryGame({onScore}){
+  const [state,setState]=useState(()=>{
+    const pick=shuffle(memojis).slice(0,8);
+    return shuffle([...pick,...pick].map((e,i)=>({id:i,emoji:e,flipped:false,matched:false})));
+  });
+  const [flipped,setFlipped]=useState([]);const [moves,setMoves]=useState(0);
+  const [done,setDone]=useState(false);const [scored,setScored]=useState(false);
+  function flip(id){
+    if(flipped.length===2)return;
+    const card=state.find(c=>c.id===id);if(card.flipped||card.matched)return;
+    const nf=[...flipped,id];
+    const ns=state.map(c=>c.id===id?{...c,flipped:true}:c);setState(ns);setFlipped(nf);
+    if(nf.length===2){
+      setMoves(m=>m+1);
+      const[a,b]=nf.map(fid=>ns.find(c=>c.id===fid));
+      if(a.emoji===b.emoji){
+        const ms=ns.map(c=>nf.includes(c.id)?{...c,matched:true}:c);setState(ms);setFlipped([]);
+        if(ms.every(c=>c.matched)){const p=Math.max(1,10-Math.floor(moves/2));if(!scored){onScore(p);setScored(true);}setDone(true);}
+      }else{setTimeout(()=>{setState(s=>s.map(c=>nf.includes(c.id)?{...c,flipped:false}:c));setFlipped([]);},900);}
+    }
+  }
+  return(
+    <div>
+      {done&&<div style={{textAlign:"center",marginBottom:16}}><div style={{fontSize:36}}>🎉</div><div style={{fontFamily:theme.font,color:theme.gold,fontSize:20}}>Klart på {moves} drag!</div></div>}
+      <div style={{color:theme.muted,fontSize:13,marginBottom:12}}>Drag: {moves}</div>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:8}}>
+        {state.map(c=>(
+          <button key={c.id} onClick={()=>flip(c.id)} style={{height:70,borderRadius:12,border:`2px solid ${c.matched?theme.green:c.flipped?theme.gold:"#333"}`,background:c.matched?theme.green+"22":c.flipped?theme.gold+"22":theme.card,fontSize:c.flipped||c.matched?32:20,cursor:c.matched||c.flipped?"default":"pointer"}}>{c.flipped||c.matched?c.emoji:"❓"}</button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ===== ORDKEDJA =====
+function WordChainGame({onScore}){
+  const [chain,setChain]=useState(["BIL"]);const [input,setInput]=useState("");
+  const [error,setError]=useState("");const [done,setDone]=useState(false);const [pts,setPts]=useState(0);
+  const last=chain[chain.length-1];const lastChar=last[last.length-1];
+  function submit(){
+    const w=input.trim().toUpperCase();if(!w)return;
+    if(w.length<2){setError("För kort!");return;}
+    if(chain.includes(w)){setError("Redan använt!");return;}
+    if(w[0]!==lastChar){setError(`Måste börja på "${lastChar}"!`);return;}
+    const nc=[...chain,w];const np=pts+1;setChain(nc);setPts(np);setInput("");setError("");
+    if(nc.length>=12){setDone(true);onScore(np);}
+  }
+  return(
+    <div>
+      <div style={{color:theme.muted,fontSize:14,marginBottom:8}}>Nästa börjar på: <strong style={{color:theme.gold,fontSize:20}}>{lastChar}</strong> • {pts}p • {chain.length}/12</div>
+      <div style={{background:theme.card,borderRadius:12,padding:12,marginBottom:14,display:"flex",flexWrap:"wrap",gap:6,minHeight:48}}>
+        {chain.map((w,i)=><span key={i} style={{background:theme.accent+"33",border:`1px solid ${theme.accent}`,borderRadius:8,padding:"2px 8px",fontSize:14}}>{w}</span>)}
+      </div>
+      {done?(<div style={{textAlign:"center"}}><div style={{fontSize:36}}>🏆</div><div style={{fontFamily:theme.font,color:theme.gold,fontSize:22}}>Klar! {pts} poäng!</div></div>):(
+        <>
+          {error&&<div style={{color:theme.accent,fontSize:14,marginBottom:8}}>{error}</div>}
+          <div style={{display:"flex",gap:8}}>
+            <input value={input} onChange={e=>setInput(e.target.value)} onKeyDown={e=>e.key==="Enter"&&submit()} placeholder={`Börjar på ${lastChar}...`}
+              style={{flex:1,background:theme.card,border:"2px solid #444",borderRadius:10,padding:"10px 14px",color:theme.text,fontSize:16}}/>
+            <button onClick={submit} style={btnStyle(theme.green,false)}>✓</button>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+// ===== RÄKNA FORDON =====
+const vTargets=[{emoji:"🚛",label:"lastbil",reward:3},{emoji:"🚌",label:"buss",reward:4},{emoji:"🚕",label:"taxi",reward:5},{emoji:"🏍️",label:"motorcykel",reward:2},{emoji:"🚓",label:"polisbil",reward:6},{emoji:"🚑",label:"ambulans",reward:7},{emoji:"🚒",label:"brandbil",reward:8},{emoji:"🚐",label:"minibuss",reward:3}];
+function CountingGame({onScore}){
+  const [target]=useState(()=>vTargets[Math.floor(Math.random()*vTargets.length)]);
+  const [count,setCount]=useState(0);const [goal]=useState(()=>3+Math.floor(Math.random()*4));const [done,setDone]=useState(false);
+  function tap(){if(done)return;const nc=count+1;setCount(nc);if(nc>=goal){setDone(true);onScore(target.reward);}}
+  return(
+    <div style={{textAlign:"center"}}>
+      <div style={{fontSize:72,margin:"16px 0"}}>{target.emoji}</div>
+      <div style={{fontFamily:theme.font,fontSize:22,marginBottom:4}}>{target.label.toUpperCase()}</div>
+      <div style={{color:theme.muted,fontSize:14,marginBottom:20}}>Mål: {goal} • {target.reward} poäng</div>
+      <div style={{fontFamily:theme.font,fontSize:64,color:done?theme.green:theme.gold,marginBottom:20}}>{count}/{goal}</div>
+      {done?(<div><div style={{fontSize:36}}>🎊</div><div style={{fontFamily:theme.font,color:theme.green,fontSize:22}}>+{target.reward} poäng!</div></div>):
+        (<button onClick={tap} style={{background:theme.accent,border:"none",borderRadius:50,width:120,height:120,fontSize:48,cursor:"pointer"}}>{target.emoji}</button>)}
+    </div>
+  );
+}
+
+// ===== GÅTOR =====
+const riddles=[
+  {q:"Jag har händer men ingen kropp, ett ansikte men ingen näsa. Vad är jag?",a:"En klocka"},
+  {q:"Ju mer du tar av mig, desto större blir jag. Vad är jag?",a:"Ett hål"},
+  {q:"Jag flyger alltid men har aldrig vingar. Vad är jag?",a:"Tiden"},
+  {q:"Vad kan gå upp men aldrig ner?",a:"Din ålder"},
+  {q:"Jag har städer men inga hus. Vad är jag?",a:"En karta"},
+  {q:"Vad kan du fånga men aldrig kasta?",a:"En förkylning"},
+  {q:"Jag är alltid framför dig men kan aldrig ses.",a:"Framtiden"},
+  {q:"Vad har en hals men ingen huvud?",a:"En flaska"},
+  {q:"Vad tillhör dig men används mest av andra?",a:"Ditt namn"},
+  {q:"Lätt som fjäder men ingen klarar hålla den länge. Vad är jag?",a:"Andan"},
+];
+function RiddleGame({onScore}){
+  const [qs]=useState(()=>shuffle(riddles).slice(0,5));
+  const [idx,setIdx]=useState(0);const [revealed,setRevealed]=useState(false);
+  const [pts,setPts]=useState(0);const [done,setDone]=useState(false);
+  function next(p){if(idx+1>=qs.length){setDone(true);onScore(p);}else{setIdx(idx+1);setRevealed(false);}}
+  if(done)return(<div style={{textAlign:"center"}}><div style={{fontSize:48}}>{pts>=8?"🧙":"🤔"}</div><div style={{fontFamily:theme.font,color:theme.gold,fontSize:24}}>{pts} poäng!</div></div>);
+  return(
+    <div>
+      <div style={{color:theme.muted,fontSize:13,marginBottom:12}}>Gåta {idx+1}/5 • {pts} poäng</div>
+      <div style={{background:theme.card,borderRadius:16,padding:24,fontSize:18,lineHeight:1.6,marginBottom:16,fontStyle:"italic"}}>🤔 {qs[idx].q}</div>
+      {!revealed?(<button onClick={()=>setRevealed(true)} style={btnStyle(theme.purple)}>Visa svaret</button>):(
+        <>
+          <div style={{background:theme.green+"22",border:`2px solid ${theme.green}`,borderRadius:12,padding:16,fontFamily:theme.font,fontSize:22,color:theme.green,textAlign:"center",marginBottom:16}}>💡 {qs[idx].a}</div>
+          <div style={{display:"flex",gap:10}}>
+            <button onClick={()=>{const np=pts+2;setPts(np);next(np);}} style={{...btnStyle(theme.green,false),flex:1}}>✓ Visste det!</button>
+            <button onClick={()=>next(pts)} style={{...btnStyle(theme.accent,false),flex:1}}>✗ Visste inte</button>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+// ===== RITA & GISSA =====
+const drawWords=["katt","hund","bil","hus","träd","sol","båt","fisk","fågel","blomma","glass","pizza","cykel","telefon","stjärna","måne","regnbåge","krabba","drake","robot"];
+function DrawingGame({onScore}){
+  const canvasRef=useRef(null);
+  const [word]=useState(()=>drawWords[Math.floor(Math.random()*drawWords.length)]);
+  const [phase,setPhase]=useState("draw");const [guess,setGuess]=useState("");const [result,setResult]=useState(null);
+  const [drawing,setDrawing]=useState(false);const [color,setColor]=useState("#e94560");const lastPos=useRef(null);
+  function getPos(e,canvas){
+    const rect=canvas.getBoundingClientRect();const scaleX=canvas.width/rect.width;const scaleY=canvas.height/rect.height;
+    const src=e.touches?e.touches[0]:e;return{x:(src.clientX-rect.left)*scaleX,y:(src.clientY-rect.top)*scaleY};
+  }
+  function startDraw(e){e.preventDefault();setDrawing(true);lastPos.current=getPos(e,canvasRef.current);}
+  function draw(e){
+    e.preventDefault();if(!drawing)return;
+    const canvas=canvasRef.current;const ctx=canvas.getContext("2d");const pos=getPos(e,canvas);
+    ctx.beginPath();ctx.moveTo(lastPos.current.x,lastPos.current.y);ctx.lineTo(pos.x,pos.y);
+    ctx.strokeStyle=color;ctx.lineWidth=4;ctx.lineCap="round";ctx.stroke();lastPos.current=pos;
+  }
+  function stopDraw(){setDrawing(false);}
+  function clearCanvas(){canvasRef.current.getContext("2d").clearRect(0,0,400,280);}
+  function submitGuess(){const correct=guess.trim().toLowerCase()===word;setResult(correct);onScore(correct?5:1);}
+  const colors=["#e94560","#f5a623","#27ae60","#3498db","#9b59b6","#ffffff","#000000"];
+  return(
+    <div>
+      {phase==="draw"?(
+        <>
+          <div style={{fontSize:14,color:theme.muted,marginBottom:8}}>Rita: <strong style={{color:theme.gold,fontSize:20}}>{word}</strong></div>
+          <div style={{display:"flex",gap:6,marginBottom:8}}>
+            {colors.map(c=><button key={c} onClick={()=>setColor(c)} style={{width:28,height:28,borderRadius:"50%",background:c,border:`3px solid ${color===c?theme.text:"transparent"}`,cursor:"pointer"}}/>)}
+            <button onClick={clearCanvas} style={{marginLeft:"auto",background:"none",border:"1px solid #444",borderRadius:8,color:theme.muted,padding:"4px 8px",cursor:"pointer",fontSize:12}}>Rensa</button>
+          </div>
+          <canvas ref={canvasRef} width={400} height={280}
+            onMouseDown={startDraw} onMouseMove={draw} onMouseUp={stopDraw}
+            onTouchStart={startDraw} onTouchMove={draw} onTouchEnd={stopDraw}
+            style={{width:"100%",background:"#f8f8f0",borderRadius:16,border:"2px solid #444",display:"block",marginBottom:12}}/>
+          <button onClick={()=>setPhase("guess")} style={btnStyle(theme.purple)}>Klar! Gissa nu →</button>
+        </>
+      ):result===null?(
+        <>
+          <canvas ref={canvasRef} width={400} height={280} style={{width:"100%",background:"#f8f8f0",borderRadius:16,marginBottom:12,display:"block"}}/>
+          <div style={{display:"flex",gap:8}}>
+            <input value={guess} onChange={e=>setGuess(e.target.value)} onKeyDown={e=>e.key==="Enter"&&submitGuess()} placeholder="Din gissning..."
+              style={{flex:1,background:theme.card,border:"2px solid #444",borderRadius:10,padding:"10px 14px",color:theme.text,fontSize:16}}/>
+            <button onClick={submitGuess} style={btnStyle(theme.green,false)}>Gissa!</button>
+          </div>
+        </>
+      ):(
+        <div style={{textAlign:"center"}}>
+          <div style={{fontSize:48}}>{result?"🎉":"😅"}</div>
+          <div style={{fontFamily:theme.font,fontSize:22,color:result?theme.green:theme.accent}}>{result?"Rätt! +5 poäng!":"Fel! Det var: "+word}</div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ===== 20 FRÅGOR =====
+function Trivia20Game({onScore}){
+  const [animal]=useState(()=>{
+    const a=[
+      {name:"elefant",big:true,domestic:false,hasLegs:true,canFly:false,laysEggs:false,hasWings:false,lives:"land",hasFur:false},
+      {name:"pingvin",big:false,domestic:false,hasLegs:true,canFly:false,laysEggs:true,hasWings:true,lives:"both",hasFur:false},
+      {name:"katt",big:false,domestic:true,hasLegs:true,canFly:false,laysEggs:false,hasWings:false,lives:"land",hasFur:true},
+      {name:"örn",big:false,domestic:false,hasLegs:true,canFly:true,laysEggs:true,hasWings:true,lives:"land",hasFur:false},
+      {name:"val",big:true,domestic:false,hasLegs:false,canFly:false,laysEggs:false,hasWings:false,lives:"water",hasFur:false},
+      {name:"krokodil",big:true,domestic:false,hasLegs:true,canFly:false,laysEggs:true,hasWings:false,lives:"both",hasFur:false},
+      {name:"häst",big:true,domestic:true,hasLegs:true,canFly:false,laysEggs:false,hasWings:false,lives:"land",hasFur:true},
+      {name:"papegoja",big:false,domestic:true,hasLegs:true,canFly:true,laysEggs:true,hasWings:true,lives:"land",hasFur:false},
+    ];
+    return a[Math.floor(Math.random()*a.length)];
+  });
+  const questions=[
+    {q:"Är det ett stort djur?",prop:"big"},{q:"Är det ett husdjur?",prop:"domestic"},
+    {q:"Har det ben?",prop:"hasLegs"},{q:"Kan det flyga?",prop:"canFly"},
+    {q:"Lägger det ägg?",prop:"laysEggs"},{q:"Har det vingar?",prop:"hasWings"},
+    {q:"Lever det i vatten?",prop:null},{q:"Har det päls?",prop:"hasFur"},
+  ];
+  const [qIdx,setQIdx]=useState(0);const [answers,setAnswers]=useState([]);
+  const [guess,setGuess]=useState("");const [phase,setPhase]=useState("questions");const [result,setResult]=useState(null);
+  function answer(yes){
+    setAnswers([...answers,yes]);
+    if(qIdx+1>=questions.length)setPhase("guess");else setQIdx(qIdx+1);
+  }
+  function submitGuess(){
+    const correct=guess.trim().toLowerCase()===animal.name;
+    setResult(correct);onScore(correct?Math.max(1,8-qIdx):0);setPhase("result");
+  }
+  const q=questions[qIdx];
+  return(
+    <div>
+      <div style={{color:theme.muted,fontSize:13,marginBottom:12}}>Tänk på ett djur! En svarar Ja/Nej, en annan gissar.</div>
+      {phase==="questions"&&(
+        <>
+          <div style={{color:theme.muted,fontSize:12,marginBottom:4}}>Fråga {qIdx+1}/{questions.length}</div>
+          <div style={{background:theme.card,borderRadius:16,padding:24,fontFamily:theme.font,fontSize:20,textAlign:"center",marginBottom:16}}>{q.q}</div>
+          <div style={{display:"flex",gap:10}}>
+            <button onClick={()=>answer(true)} style={{...btnStyle(theme.green,false),flex:1,fontSize:18}}>✓ Ja</button>
+            <button onClick={()=>answer(false)} style={{...btnStyle(theme.accent,false),flex:1,fontSize:18}}>✗ Nej</button>
+          </div>
+          <div style={{marginTop:16}}>{answers.map((a,i)=><div key={i} style={{color:theme.muted,fontSize:13}}>{questions[i].q} → <span style={{color:a?theme.green:theme.accent}}>{a?"Ja":"Nej"}</span></div>)}</div>
+        </>
+      )}
+      {phase==="guess"&&(
+        <div style={{display:"flex",gap:8}}>
+          <input value={guess} onChange={e=>setGuess(e.target.value)} onKeyDown={e=>e.key==="Enter"&&submitGuess()} placeholder="Vilket djur?"
+            style={{flex:1,background:theme.card,border:"2px solid #444",borderRadius:10,padding:"10px 14px",color:theme.text,fontSize:16}}/>
+          <button onClick={submitGuess} style={btnStyle(theme.purple,false)}>Gissa!</button>
+        </div>
+      )}
+      {phase==="result"&&(
+        <div style={{textAlign:"center"}}>
+          <div style={{fontSize:48}}>{result?"🎉":"🤷"}</div>
+          <div style={{fontFamily:theme.font,fontSize:22,color:result?theme.green:theme.accent}}>{result?"Rätt!":`Det var: ${animal.name}`}</div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ===== SNAKE =====
+const SW=16,SH=20,SC=18;
+function SnakeGame({onScore}){
+  const [snake,setSnake]=useState([[8,10],[8,11],[8,12]]);
+  const [dir,setDir]=useState([0,-1]);
+  const [food,setFood]=useState([4,5]);
+  const [running,setRunning]=useState(false);
+  const [dead,setDead]=useState(false);
+  const [pts,setPts]=useState(0);
+  const [scored,setScored]=useState(false);
+  const ref=useRef({snake,dir,food,dead,pts});
+  useEffect(()=>{ref.current={snake,dir,food,dead,pts};},[snake,dir,food,dead,pts]);
+  function randFood(sn){let f;do{f=[Math.floor(Math.random()*SW),Math.floor(Math.random()*SH)];}while(sn.some(([x,y])=>x===f[0]&&y===f[1]));return f;}
+  useEffect(()=>{
+    if(!running)return;
+    const id=setInterval(()=>{
+      const{snake:sn,dir:d,food:fo,dead:de,pts:p}=ref.current;
+      if(de)return;
+      const head=[sn[0][0]+d[0],sn[0][1]+d[1]];
+      if(head[0]<0||head[0]>=SW||head[1]<0||head[1]>=SH||sn.some(([x,y])=>x===head[0]&&y===head[1])){
+        setDead(true);setRunning(false);if(!ref.current.scored){onScore(p);setScored(true);}return;
+      }
+      const ate=head[0]===fo[0]&&head[1]===fo[1];
+      const newSn=ate?[head,...sn]:[head,...sn.slice(0,-1)];
+      const newFood=ate?randFood(newSn):fo;
+      setSnake(newSn);setFood(newFood);if(ate)setPts(p2=>p2+1);
+    },150);
+    return()=>clearInterval(id);
+  },[running]);
+  function hDir(dx,dy){const{dir:d}=ref.current;if(d[0]===-dx&&d[1]===-dy)return;setDir([dx,dy]);}
+  function reset(){const s=[[8,10],[8,11],[8,12]];setSnake(s);setDir([0,-1]);setFood(randFood(s));setDead(false);setPts(0);setRunning(false);setScored(false);}
+  const gW=SW*SC,gH=SH*SC;
+  return(
+    <div style={{textAlign:"center"}}>
+      <div style={{fontFamily:theme.font,color:theme.gold,fontSize:18,marginBottom:8}}>🍎 {pts} poäng{dead?" — Game Over!":""}</div>
+      <div style={{position:"relative",width:gW,height:gH,background:"#0a1628",borderRadius:12,margin:"0 auto 12px",border:"2px solid #2ecc71",overflow:"hidden"}}>
+        <div style={{position:"absolute",left:food[0]*SC,top:food[1]*SC,width:SC,height:SC,display:"flex",alignItems:"center",justifyContent:"center",fontSize:14}}>🍎</div>
+        {snake.map(([x,y],i)=>(
+          <div key={i} style={{position:"absolute",left:x*SC+1,top:y*SC+1,width:SC-2,height:SC-2,borderRadius:i===0?6:3,background:i===0?"#2ecc71":"#27ae60"}}/>
+        ))}
+        {!running&&!dead&&<div style={{position:"absolute",inset:0,display:"flex",alignItems:"center",justifyContent:"center",background:"#0a162888"}}><div style={{fontFamily:theme.font,color:"#2ecc71",fontSize:20}}>Tryck Start!</div></div>}
+      </div>
+      <div style={{display:"grid",gridTemplateColumns:"60px 60px 60px",gap:4,justifyContent:"center",marginBottom:12}}>
+        <div/><button onClick={()=>hDir(0,-1)} style={{height:60,borderRadius:12,background:theme.card,border:"2px solid #2ecc71",color:"#2ecc71",fontSize:24,cursor:"pointer"}}>↑</button><div/>
+        <button onClick={()=>hDir(-1,0)} style={{height:60,borderRadius:12,background:theme.card,border:"2px solid #2ecc71",color:"#2ecc71",fontSize:24,cursor:"pointer"}}>←</button>
+        <button onClick={()=>hDir(0,1)} style={{height:60,borderRadius:12,background:theme.card,border:"2px solid #2ecc71",color:"#2ecc71",fontSize:24,cursor:"pointer"}}>↓</button>
+        <button onClick={()=>hDir(1,0)} style={{height:60,borderRadius:12,background:theme.card,border:"2px solid #2ecc71",color:"#2ecc71",fontSize:24,cursor:"pointer"}}>→</button>
+      </div>
+      <div style={{display:"flex",gap:8,justifyContent:"center"}}>
+        {!running&&!dead&&<button onClick={()=>setRunning(true)} style={btnStyle("#2ecc71",false)}>▶ Start</button>}
+        {running&&<button onClick={()=>setRunning(false)} style={btnStyle(theme.muted,false)}>⏸ Pausa</button>}
+        {!running&&pts>0&&!dead&&<button onClick={()=>setRunning(true)} style={btnStyle("#2ecc71",false)}>▶ Fortsätt</button>}
+        {dead&&<button onClick={reset} style={btnStyle(theme.blue,false)}>↺ Igen</button>}
+      </div>
+    </div>
+  );
+}
+
+// ===== TETRIS =====
+const TW=8,TH=14;
+const TETROS=[
+  {shape:[[1,1,1,1]],color:"#00f0f0"},
+  {shape:[[1,1],[1,1]],color:"#f0f000"},
+  {shape:[[0,1,1],[1,1,0]],color:"#00f000"},
+  {shape:[[1,1,0],[0,1,1]],color:"#f00000"},
+  {shape:[[1,0,0],[1,1,1]],color:"#f0a000"},
+  {shape:[[0,0,1],[1,1,1]],color:"#0000f0"},
+  {shape:[[0,1,0],[1,1,1]],color:"#a000f0"},
+];
+function newBoard(){return Array(TH).fill(null).map(()=>Array(TW).fill(0));}
+function randPiece(){const t=TETROS[Math.floor(Math.random()*TETROS.length)];return{shape:t.shape,color:t.color,x:Math.floor((TW-t.shape[0].length)/2),y:0};}
+function tcollides(board,piece,dx=0,dy=0,shape=piece.shape){
+  for(let r=0;r<shape.length;r++)for(let c=0;c<shape[r].length;c++)if(shape[r][c]){
+    const nx=piece.x+c+dx,ny=piece.y+r+dy;
+    if(nx<0||nx>=TW||ny>=TH||(ny>=0&&board[ny][nx]))return true;
+  }
+  return false;
+}
+function trotate(shape){return shape[0].map((_,i)=>shape.map(row=>row[i]).reverse());}
+function tmerge(board,piece){
+  const b=board.map(r=>[...r]);
+  piece.shape.forEach((row,r)=>row.forEach((v,c)=>{if(v){const ny=piece.y+r,nx=piece.x+c;if(ny>=0)b[ny][nx]=piece.color;}}));
+  return b;
+}
+function tclearLines(board){
+  const kept=board.filter(r=>r.some(v=>!v));
+  const cleared=TH-kept.length;
+  return{board:[...Array(cleared).fill(null).map(()=>Array(TW).fill(0)),...kept],lines:cleared};
+}
+function TetrisGame({onScore}){
+  const [board,setBoard]=useState(newBoard());
+  const [piece,setPiece]=useState(()=>randPiece());
+  const [next,setNext]=useState(()=>randPiece());
+  const [running,setRunning]=useState(false);
+  const [over,setOver]=useState(false);
+  const [pts,setPts]=useState(0);
+  const [lines,setLines]=useState(0);
+  const ref=useRef({board,piece,next,running,over,pts});
+  useEffect(()=>{ref.current={board,piece,next,running,over,pts};},[board,piece,next,running,over,pts]);
+  function lock(b,p){
+    const nb=tmerge(b,p);const{board:cb,lines:cl}=tclearLines(nb);
+    const np=ref.current.next;const nn=randPiece();
+    if(tcollides(cb,np)){setBoard(cb);setOver(true);setRunning(false);const total=ref.current.pts+cl*10;setPts(total);onScore(total);}
+    else{setBoard(cb);setPiece(np);setNext(nn);setPts(p2=>p2+cl*10);setLines(l=>l+cl);}
+  }
+  useEffect(()=>{
+    if(!running)return;
+    const id=setInterval(()=>{
+      const{board:b,piece:p,over:o}=ref.current;if(o)return;
+      if(!tcollides(b,p,0,1))setPiece(pc=>({...pc,y:pc.y+1}));else lock(b,p);
+    },500);
+    return()=>clearInterval(id);
+  },[running]);
+  function move(dx){if(!running)return;const{board:b,piece:p}=ref.current;if(!tcollides(b,p,dx,0))setPiece(pc=>({...pc,x:pc.x+dx}));}
+  function drop(){if(!running)return;const{board:b,piece:p}=ref.current;if(!tcollides(b,p,0,1))setPiece(pc=>({...pc,y:pc.y+1}));else lock(b,p);}
+  function rot(){if(!running)return;const{board:b,piece:p}=ref.current;const r=trotate(p.shape);if(!tcollides(b,{...p,shape:r}))setPiece(pc=>({...pc,shape:r}));}
+  function hardDrop(){if(!running)return;const{board:b,piece:p}=ref.current;let ny=p.y;while(!tcollides(b,p,0,ny-p.y+1))ny++;lock(b,{...p,y:ny});}
+  function reset(){setBoard(newBoard());setPiece(randPiece());setNext(randPiece());setOver(false);setPts(0);setLines(0);setRunning(false);}
+  const display=board.map(r=>[...r]);
+  piece.shape.forEach((row,r)=>row.forEach((v,c)=>{if(v){const ny=piece.y+r,nx=piece.x+c;if(ny>=0&&ny<TH&&nx>=0&&nx<TW)display[ny][nx]=piece.color;}}));
+  const C2=28;
+  return(
+    <div style={{textAlign:"center"}}>
+      <div style={{display:"flex",justifyContent:"center",gap:16,marginBottom:8}}>
+        <span style={{fontFamily:theme.font,color:theme.purple,fontSize:16}}>⭐ {pts}</span>
+        <span style={{fontFamily:theme.font,color:theme.muted,fontSize:16}}>Rader: {lines}</span>
+      </div>
+      <div style={{display:"flex",gap:12,justifyContent:"center"}}>
+        <div style={{border:"2px solid #8e44ad",borderRadius:8,overflow:"hidden",display:"inline-block"}}>
+          {display.map((row,r)=>(
+            <div key={r} style={{display:"flex"}}>
+              {row.map((cell,c)=>(<div key={c} style={{width:C2,height:C2,background:cell||"#0a1628",borderRight:"1px solid #1a1a3a",borderBottom:"1px solid #1a1a3a"}}/>))}
+            </div>
+          ))}
+        </div>
+        <div>
+          <div style={{fontFamily:theme.font,color:theme.muted,fontSize:12,marginBottom:4}}>Nästa:</div>
+          <div style={{background:"#0a1628",border:"1px solid #8e44ad",borderRadius:6,padding:4,display:"inline-block"}}>
+            {next.shape.map((row,r)=>(
+              <div key={r} style={{display:"flex"}}>
+                {row.map((v,c)=><div key={c} style={{width:14,height:14,background:v?next.color:"transparent"}}/>)}
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+      <div style={{marginTop:12}}>
+        <div style={{display:"grid",gridTemplateColumns:"52px 52px 52px",gap:4,justifyContent:"center",marginBottom:8}}>
+          <button onClick={rot} style={{gridColumn:"1/4",height:44,borderRadius:10,background:theme.card,border:"2px solid #8e44ad",color:"#8e44ad",fontSize:18,cursor:"pointer",fontFamily:theme.font}}>↻ Rotera</button>
+          <button onClick={()=>move(-1)} style={{height:52,borderRadius:10,background:theme.card,border:"2px solid #8e44ad",color:"#8e44ad",fontSize:24,cursor:"pointer"}}>←</button>
+          <button onClick={drop} style={{height:52,borderRadius:10,background:theme.card,border:"2px solid #8e44ad",color:"#8e44ad",fontSize:24,cursor:"pointer"}}>↓</button>
+          <button onClick={()=>move(1)} style={{height:52,borderRadius:10,background:theme.card,border:"2px solid #8e44ad",color:"#8e44ad",fontSize:24,cursor:"pointer"}}>→</button>
+          <button onClick={hardDrop} style={{gridColumn:"1/4",height:44,borderRadius:10,background:"#8e44ad33",border:"2px solid #8e44ad",color:"#8e44ad",fontSize:14,cursor:"pointer",fontFamily:theme.font}}>⬇ Kasta ner</button>
+        </div>
+        <div style={{display:"flex",gap:8,justifyContent:"center"}}>
+          {!running&&!over&&<button onClick={()=>setRunning(true)} style={btnStyle("#8e44ad",false)}>▶ Start</button>}
+          {running&&<button onClick={()=>setRunning(false)} style={btnStyle(theme.muted,false)}>⏸ Pausa</button>}
+          {!running&&pts>0&&!over&&<button onClick={()=>setRunning(true)} style={btnStyle("#8e44ad",false)}>▶ Fortsätt</button>}
+          {over&&<button onClick={reset} style={btnStyle(theme.blue,false)}>↺ Igen</button>}
+        </div>
+        {over&&<div style={{fontFamily:theme.font,color:theme.accent,fontSize:20,marginTop:8}}>Game Over! {pts} poäng</div>}
+      </div>
+    </div>
+  );
+}
+
+// ===== VÄGBINGO =====
+const BITEMS=[
+  {emoji:"🚛",label:"Lastbil"},{emoji:"🐄",label:"Ko"},{emoji:"⛽",label:"Bensinmack"},
+  {emoji:"🌾",label:"Åker"},{emoji:"🚜",label:"Traktor"},{emoji:"⛪",label:"Kyrka"},
+  {emoji:"🏗️",label:"Bygge"},{emoji:"🌊",label:"Vatten"},{emoji:"🚌",label:"Buss"},
+  {emoji:"🌲",label:"Skog"},{emoji:"🏠",label:"Röd stuga"},{emoji:"🐎",label:"Häst"},
+  {emoji:"🏍️",label:"Motorcykel"},{emoji:"🌻",label:"Solros"},{emoji:"🦅",label:"Rovfågel"},
+  {emoji:"🚑",label:"Ambulans"},{emoji:"⛺",label:"Tält"},{emoji:"🚂",label:"Tåg"},
+  {emoji:"🏖️",label:"Strand"},{emoji:"🦊",label:"Räv"},{emoji:"🚓",label:"Polisbil"},
+  {emoji:"🌈",label:"Regnbåge"},{emoji:"⚡",label:"Vindkraft"},{emoji:"🐦",label:"Flock fåglar"},
+  {emoji:"🎪",label:"Cirkustält"},
+];
+function BingoGame({onScore}){
+  const [grid]=useState(()=>shuffle(BITEMS).slice(0,25));
+  const [marked,setMarked]=useState(new Set());
+  const [won,setWon]=useState(false);const [scored,setScored]=useState(false);
+  function checkBingo(m){
+    for(let r=0;r<5;r++){
+      if([0,1,2,3,4].every(c=>m.has(r*5+c)))return true;
+      if([0,1,2,3,4].every(c=>m.has(c*5+r)))return true;
+    }
+    return[0,6,12,18,24].every(i=>m.has(i))||[4,8,12,16,20].every(i=>m.has(i));
+  }
+  function tap(i){
+    if(won)return;
+    const nm=new Set(marked);if(nm.has(i))nm.delete(i);else nm.add(i);
+    setMarked(nm);
+    if(checkBingo(nm)&&!scored){setWon(true);setScored(true);onScore(nm.size);}
+  }
+  function isWinCell(i){
+    const m=marked;
+    for(let r=0;r<5;r++){
+      if([0,1,2,3,4].every(c=>m.has(r*5+c))&&Math.floor(i/5)===r)return true;
+      if([0,1,2,3,4].every(c=>m.has(c*5+r))&&i%5===r)return true;
+    }
+    return([0,6,12,18,24].every(j=>m.has(j))&&[0,6,12,18,24].includes(i))||([4,8,12,16,20].every(j=>m.has(j))&&[4,8,12,16,20].includes(i));
+  }
+  return(
+    <div>
+      <div style={{fontSize:13,color:theme.muted,marginBottom:12}}>
+        Markera saker ni ser längs vägen! {marked.size} markerade.
+        {won&&<span style={{color:theme.gold,fontFamily:theme.font}}> 🎉 BINGO!</span>}
+      </div>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:4}}>
+        {grid.map((item,i)=>{
+          const isM=marked.has(i);const isW=isM&&isWinCell(i);
+          return(
+            <button key={i} onClick={()=>tap(i)} style={{
+              background:isW?theme.gold+"44":isM?theme.green+"44":theme.card,
+              border:`2px solid ${isW?theme.gold:isM?theme.green:"#333"}`,
+              borderRadius:10,padding:"6px 2px",cursor:"pointer",
+              display:"flex",flexDirection:"column",alignItems:"center",gap:2,
+            }}>
+              <span style={{fontSize:20}}>{item.emoji}</span>
+              <span style={{fontSize:9,color:isM?theme.text:theme.muted,textAlign:"center",lineHeight:1.2}}>{item.label}</span>
+              {isM&&<span style={{fontSize:10}}>✓</span>}
+            </button>
+          );
+        })}
+      </div>
+      {won&&<div style={{textAlign:"center",marginTop:16}}><div style={{fontSize:48}}>🎉</div><div style={{fontFamily:theme.font,color:theme.gold,fontSize:24}}>BINGO! +{marked.size} poäng!</div></div>}
+    </div>
+  );
+}
+
+// ===== PLAYER SETUP =====
+function PlayerSetup({onDone,highscores}){
+  const [name,setName]=useState("");
+  const tot={};
+  Object.values(highscores).forEach(entries=>entries.forEach(({player,pts})=>{tot[player]=(tot[player]||0)+pts;}));
+  const best=Object.entries(tot).sort((a,b)=>b[1]-a[1]).slice(0,5);
+  return(
+    <div style={{maxWidth:420,margin:"0 auto",padding:24,textAlign:"center"}}>
+      <div style={{fontSize:56,marginBottom:8}}>🚌</div>
+      <h1 style={{fontFamily:theme.font,color:theme.gold,fontSize:30,margin:"0 0 4px"}}>Bilresespel!</h1>
+      <p style={{color:theme.muted,fontSize:14,marginBottom:28}}>Skåne → Järrestad • 12 spel</p>
+      <div style={{background:theme.card,borderRadius:16,padding:20,marginBottom:20}}>
+        <div style={{fontFamily:theme.font,fontSize:18,marginBottom:12}}>Vad heter du?</div>
+        <input value={name} onChange={e=>setName(e.target.value)} onKeyDown={e=>e.key==="Enter"&&name.trim()&&onDone(name.trim())}
+          placeholder="Ditt namn..." maxLength={16}
+          style={{width:"100%",boxSizing:"border-box",background:"#0d1117",border:`2px solid ${name.trim()?theme.gold:"#444"}`,borderRadius:10,padding:"12px 16px",color:theme.text,fontFamily:theme.font,fontSize:20,textAlign:"center",marginBottom:12}}/>
+        <button onClick={()=>name.trim()&&onDone(name.trim())} disabled={!name.trim()}
+          style={{...btnStyle(theme.gold,true),opacity:name.trim()?1:0.4,color:"#1a1a2e",marginTop:0}}>Spela! →</button>
+      </div>
+      {best.length>0&&(
+        <div style={{background:theme.card,borderRadius:16,padding:16}}>
+          <div style={{fontFamily:theme.font,color:theme.gold,fontSize:16,marginBottom:10}}>🏆 Topplista</div>
+          {best.map(([player,total],i)=>(
+            <div key={player} style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:i<best.length-1?"1px solid #2a2a4a":"none"}}>
+              <span style={{color:[theme.gold,"#c0c0c0","#cd7f32",theme.muted,theme.muted][i],fontSize:14}}>{["🥇","🥈","🥉","4.","5."][i]} {player}</span>
+              <span style={{fontFamily:theme.font,fontSize:16}}>{total} ⭐</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ===== HIGHSCORE SCREEN =====
+function HighscoreScreen({highscores,currentPlayer,onBack}){
+  const tot={};
+  Object.values(highscores).forEach(entries=>entries.forEach(({player,pts})=>{tot[player]=(tot[player]||0)+pts;}));
+  const sorted=Object.entries(tot).sort((a,b)=>b[1]-a[1]);
+  const medals=["🥇","🥈","🥉"];
+  return(
+    <div style={{maxWidth:480,margin:"0 auto",padding:16}}>
+      <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:20}}>
+        <button onClick={onBack} style={{background:"none",border:`2px solid ${theme.muted}`,borderRadius:10,color:theme.muted,padding:"6px 12px",cursor:"pointer"}}>← Hem</button>
+        <h2 style={{fontFamily:theme.font,color:theme.gold,margin:0,fontSize:22}}>🏆 Highscore</h2>
+      </div>
+      <div style={{background:theme.card,borderRadius:16,padding:16,marginBottom:16}}>
+        <div style={{fontFamily:theme.font,color:theme.gold,fontSize:16,marginBottom:12}}>Totalpoäng — alla spel</div>
+        {sorted.length===0&&<div style={{color:theme.muted,fontSize:14}}>Inga poäng ännu!</div>}
+        {sorted.map(([player,total],i)=>(
+          <div key={player} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"10px 0",borderBottom:i<sorted.length-1?"1px solid #2a2a4a":"none",background:player===currentPlayer?theme.gold+"11":"none",borderRadius:8,paddingLeft:player===currentPlayer?8:0}}>
+            <span style={{fontFamily:theme.font,color:i<3?[theme.gold,"#c0c0c0","#cd7f32"][i]:theme.text,fontSize:16}}>
+              {i<3?medals[i]:`${i+1}.`} {player}
+              {player===currentPlayer&&<span style={{color:theme.gold,fontSize:12}}> ← du</span>}
+            </span>
+            <span style={{fontFamily:theme.font,color:theme.gold,fontSize:20}}>{total} ⭐</span>
+          </div>
+        ))}
+      </div>
+      <div style={{fontFamily:theme.font,color:theme.muted,fontSize:14,marginBottom:10}}>Bästa per spel:</div>
+      {games.map(g=>{
+        const entries=(highscores[g.id]||[]).slice(0,3);if(!entries.length)return null;
+        return(
+          <div key={g.id} style={{background:theme.card,borderRadius:12,padding:12,marginBottom:8}}>
+            <div style={{fontFamily:theme.font,color:g.color,fontSize:14,marginBottom:6}}>{g.emoji} {g.label}</div>
+            {entries.map(({player,pts},i)=>(
+              <div key={i} style={{display:"flex",justifyContent:"space-between",fontSize:13,color:player===currentPlayer?theme.gold:theme.text,padding:"2px 0"}}>
+                <span>{medals[i]||`${i+1}.`} {player}</span><span>{pts}p</span>
+              </div>
+            ))}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// ===== MAIN APP =====
+function App(){
+  const [screen,setScreen]=useState("setup");
+  const [player,setPlayer]=useState("");
+  const [highscores,setHighscores]=useState({});
+  const [sessionScores,setSessionScores]=useState({});
+
+  function handleSetupDone(name){setPlayer(name);setSessionScores({});setScreen("home");}
+
+  function addScore(gameId,pts){
+    setSessionScores(s=>({...s,[gameId]:Math.max(s[gameId]||0,pts)}));
+    setHighscores(hs=>{
+      const existing=hs[gameId]||[];
+      const others=existing.filter(e=>e.player!==player);
+      const pb=existing.find(e=>e.player===player);
+      const best=pb?Math.max(pb.pts,pts):pts;
+      const updated=[...others,{player,pts:best}].sort((a,b)=>b.pts-a.pts).slice(0,10);
+      return{...hs,[gameId]:updated};
+    });
+  }
+
+  const gameMap={
+    hangman:  <HangmanGame   onScore={p=>addScore("hangman",p)}/>,
+    tictactoe:<TicTacToeGame onScore={p=>addScore("tictactoe",p)}/>,
+    quiz:     <QuizGame      onScore={p=>addScore("quiz",p)}/>,
+    memory:   <MemoryGame    onScore={p=>addScore("memory",p)}/>,
+    wordchain:<WordChainGame onScore={p=>addScore("wordchain",p)}/>,
+    counting: <CountingGame  onScore={p=>addScore("counting",p)}/>,
+    riddle:   <RiddleGame    onScore={p=>addScore("riddle",p)}/>,
+    drawing:  <DrawingGame   onScore={p=>addScore("drawing",p)}/>,
+    trivia20: <Trivia20Game  onScore={p=>addScore("trivia20",p)}/>,
+    snake:    <SnakeGame     onScore={p=>addScore("snake",p)}/>,
+    tetris:   <TetrisGame    onScore={p=>addScore("tetris",p)}/>,
+    bingo:    <BingoGame     onScore={p=>addScore("bingo",p)}/>,
+  };
+
+  const gameInfo=games.find(g=>g.id===screen);
+  const sessionTotal=Object.values(sessionScores).reduce((a,b)=>a+b,0);
+
+  return(
+    <div style={{minHeight:"100vh",background:theme.bg,color:theme.text,fontFamily:theme.body,paddingBottom:60}}>
+      {screen==="setup"&&<PlayerSetup onDone={handleSetupDone} highscores={highscores}/>}
+      {screen==="home"&&(
+        <>
+          <HomeScreen onSelect={setScreen} scores={sessionScores}/>
+          <div style={{maxWidth:480,margin:"0 auto",padding:"0 16px 16px"}}>
+            <button onClick={()=>setScreen("highscore")} style={btnStyle(theme.gold)}>🏆 Visa Highscore</button>
+            <button onClick={()=>setScreen("setup")} style={{...btnStyle(theme.muted,true),background:"none",border:`2px solid ${theme.muted}`,boxShadow:"none",marginTop:8}}>👤 Byt spelare</button>
+          </div>
+        </>
+      )}
+      {screen==="highscore"&&<HighscoreScreen highscores={highscores} currentPlayer={player} onBack={()=>setScreen("home")}/>}
+      {gameInfo&&gameMap[screen]&&(
+        <GameWrapper title={gameInfo.label} emoji={gameInfo.emoji} color={gameInfo.color} onBack={()=>setScreen("home")}>
+          {gameMap[screen]}
+        </GameWrapper>
+      )}
+      {screen!=="setup"&&(
+        <div style={{position:"fixed",bottom:0,left:0,right:0,background:"#0d1117ee",borderTop:"1px solid #333",padding:"8px 16px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+          <span style={{color:theme.muted,fontSize:13}}>👤 {player}</span>
+          <span style={{fontFamily:theme.font,color:theme.gold,fontSize:14}}>{sessionTotal} ⭐ denna omgång</span>
+          {screen!=="highscore"&&<button onClick={()=>setScreen("highscore")} style={{background:"none",border:`1px solid ${theme.gold}`,borderRadius:8,color:theme.gold,padding:"4px 10px",cursor:"pointer",fontSize:12}}>🏆</button>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
+</script>
+</body>
+</html>
