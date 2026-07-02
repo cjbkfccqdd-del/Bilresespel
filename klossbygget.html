@@ -23,23 +23,38 @@
   #top h1 span{ color:var(--accent); }
   .pill{ flex:0 0 auto; font-size:12px; color:var(--muted); background:#0d1424; padding:5px 9px; border-radius:20px; border:1px solid var(--panel-line); white-space:nowrap; }
   /* tunn, diskret scrollbar för scrollbara rader */
-  #top, #levelbar, #palette{ scrollbar-width:thin; scrollbar-color:var(--panel-line) transparent; }
-  #top::-webkit-scrollbar, #levelbar::-webkit-scrollbar, #palette::-webkit-scrollbar{ height:4px; }
-  #top::-webkit-scrollbar-thumb, #levelbar::-webkit-scrollbar-thumb, #palette::-webkit-scrollbar-thumb{ background:var(--panel-line); border-radius:4px; }
+  #top, #levelbar, #catRow{ scrollbar-width:thin; scrollbar-color:var(--panel-line) transparent; }
+  #top::-webkit-scrollbar, #levelbar::-webkit-scrollbar, #catRow::-webkit-scrollbar{ height:4px; }
+  #top::-webkit-scrollbar-thumb, #levelbar::-webkit-scrollbar-thumb, #catRow::-webkit-scrollbar-thumb{ background:var(--panel-line); border-radius:4px; }
 
   /* Mode toggle */
   .modebtn{ flex:0 0 auto; font-size:13px; font-weight:bold; padding:8px 12px; border-radius:10px; border:2px solid var(--panel-line);
     background:#0d1424; color:var(--text); cursor:pointer; white-space:nowrap; }
   .modebtn.active{ background:var(--hero); color:#3a2c00; border-color:var(--hero-d); }
 
-  /* Builder palette */
-  #palette{ flex:0 0 auto; display:flex; gap:6px; padding:8px 10px; background:var(--panel); border-top:2px solid var(--panel-line);
-    overflow-x:auto; align-items:center; padding-bottom:max(8px,env(safe-area-inset-bottom)); }
-  #palette.hidden{ display:none; }
-  .tool{ flex:0 0 auto; width:48px; height:48px; border-radius:10px; border:2px solid var(--panel-line); background:#0d1424;
-    display:flex; align-items:center; justify-content:center; font-size:22px; cursor:pointer; position:relative; }
-  .tool.active{ border-color:var(--hero); box-shadow:0 0 0 2px var(--hero) inset; }
-  .tool small{ position:absolute; bottom:-2px; font-size:8px; color:var(--muted); }
+  /* Builder palette — grupperad: utfälld verktygsrad ovanför kategorirad */
+  #paletteWrap{ flex:0 0 auto; background:var(--panel); border-top:2px solid var(--panel-line);
+    padding-bottom:max(6px,env(safe-area-inset-bottom)); }
+  #paletteWrap.hidden{ display:none; }
+
+  /* utfälld verktygsrad */
+  #toolRow{ display:flex; gap:6px; padding:8px 10px 4px; align-items:center; flex-wrap:wrap;
+    justify-content:center; min-height:60px; }
+
+  /* kategorirad */
+  #catRow{ display:flex; gap:6px; padding:4px 10px 6px; align-items:center; overflow-x:auto; }
+  .cat{ flex:0 0 auto; min-width:56px; height:46px; border-radius:10px; border:2px solid var(--panel-line);
+    background:#0d1424; display:flex; flex-direction:column; align-items:center; justify-content:center;
+    font-size:20px; cursor:pointer; position:relative; padding:0 6px; }
+  .cat small{ font-size:9px; color:var(--muted); margin-top:1px; }
+  .cat.active{ border-color:var(--hero); background:#1a2438; box-shadow:0 0 0 2px var(--hero) inset; }
+  .cat.active small{ color:var(--hero); }
+
+  .tool{ flex:0 0 auto; width:52px; height:52px; border-radius:10px; border:2px solid var(--panel-line); background:#0d1424;
+    display:flex; align-items:center; justify-content:center; font-size:24px; cursor:pointer; position:relative; }
+  .tool.active{ border-color:var(--hero); box-shadow:0 0 0 2px var(--hero) inset; background:#1a2438; }
+  .tool small{ position:absolute; bottom:-3px; font-size:8px; color:var(--muted); background:var(--panel); padding:0 2px; border-radius:3px; }
+  .tool.active small{ color:var(--hero); }
   .sep{ width:2px; height:34px; background:var(--panel-line); flex:0 0 auto; margin:0 2px; }
   .txtbtn{ flex:0 0 auto; font-size:11px; padding:6px 10px; border-radius:8px; border:1px solid var(--panel-line);
     background:#0d1424; color:var(--muted); cursor:pointer; }
@@ -120,8 +135,10 @@
     #levelbar{ gap:6px; padding:5px 8px; }
     .lvlbtn{ font-size:12px; padding:6px 9px; }
     #lvLabel{ min-width:78px; font-size:12px; }
-    #palette{ gap:5px; padding:7px 8px; }
-    .tool{ width:44px; height:44px; font-size:20px; }
+    #toolRow{ gap:5px; padding:7px 8px 3px; min-height:56px; }
+    #catRow{ gap:5px; padding:3px 8px 5px; }
+    .tool{ width:48px; height:48px; font-size:22px; }
+    .cat{ min-width:52px; height:44px; font-size:18px; }
     .txtbtn{ font-size:10px; padding:6px 8px; }
     .card{ width:150px; }
   }
@@ -203,27 +220,18 @@
     </div>
   </div>
 
-  <div id="palette">
-    <div class="tool active" data-tool="ground" title="Mark">🟫<small>mark</small></div>
-    <div class="tool" data-tool="brick" title="Kloss">🧱<small>kloss</small></div>
-    <div class="tool" data-tool="spike" title="Taggar">🔺<small>tagg</small></div>
-    <div class="tool" data-tool="bounce" title="Studsmatta">🟢<small>studs</small></div>
-    <div class="tool" data-tool="ladder" title="Stege">🪜<small>stege</small></div>
-    <div class="tool" data-tool="slideL" title="Rutschkana vänster">↙️<small>rutsch</small></div>
-    <div class="tool" data-tool="slideR" title="Rutschkana höger">↘️<small>rutsch</small></div>
-    <div class="tool" data-tool="coin" title="Mynt">🟡<small>mynt</small></div>
-    <div class="tool" data-tool="chest" title="Skattkista">🎁<small>kista</small></div>
-    <div class="tool" data-tool="beltL" title="Rullband vänster">⏪<small>band</small></div>
-    <div class="tool" data-tool="beltR" title="Rullband höger">⏩<small>band</small></div>
-    <div class="tool" data-tool="enemy1" title="Krypare (patrullerar)">👾<small>kryp</small></div>
-    <div class="tool" data-tool="enemy2" title="Hoppare (studsar)">🐸<small>hopp</small></div>
-    <div class="tool" data-tool="enemy3" title="Flygare (svävar)">🦇<small>flyg</small></div>
-    <div class="tool" data-tool="start" title="Start">🚩<small>start</small></div>
-    <div class="tool" data-tool="goal" title="Mål">🏁<small>mål</small></div>
-    <div class="tool" data-tool="erase" title="Sudda">🧽<small>sudda</small></div>
-    <div class="sep"></div>
-    <button class="txtbtn" id="bWiden">＋ Bredare</button>
-    <button class="txtbtn warn" id="bClear">Rensa</button>
+  <div id="paletteWrap">
+    <div id="toolRow"><!-- verktyg för vald grupp fylls i av JS --></div>
+    <div id="catRow">
+      <div class="cat active" data-cat="mark">🧱<small>Block</small></div>
+      <div class="cat" data-cat="mek">⚙️<small>Mekanik</small></div>
+      <div class="cat" data-cat="foremal">💎<small>Föremål</small></div>
+      <div class="cat" data-cat="fiender">👾<small>Fiender</small></div>
+      <div class="cat" data-cat="bana">🎯<small>Bana</small></div>
+      <div class="sep"></div>
+      <button class="txtbtn" id="bWiden">＋ Bredare</button>
+      <button class="txtbtn warn" id="bClear">Rensa</button>
+    </div>
   </div>
 </div>
 
@@ -487,14 +495,69 @@ function onUp(e){
 
 function clamp(v,a,b){ return v<a?a:(v>b?b:v); }
 
-// ---------- Palettknappar ----------
-document.querySelectorAll('.tool').forEach(t=>{
-  t.addEventListener('click', ()=>{
-    document.querySelectorAll('.tool').forEach(x=>x.classList.remove('active'));
-    t.classList.add('active');
-    currentTool=t.dataset.tool;
+// ---------- Palett: grupperade verktyg i expanderande kategorier ----------
+const TOOL_GROUPS = {
+  mark: [
+    {tool:'ground', icon:'🟫', label:'mark',  title:'Mark'},
+    {tool:'brick',  icon:'🧱', label:'kloss', title:'Kloss'},
+  ],
+  mek: [
+    {tool:'bounce', icon:'🟢', label:'studs',  title:'Studsmatta'},
+    {tool:'ladder', icon:'🪜', label:'stege',  title:'Stege'},
+    {tool:'slideL', icon:'↙️', label:'rutsch', title:'Rutschkana vänster'},
+    {tool:'slideR', icon:'↘️', label:'rutsch', title:'Rutschkana höger'},
+    {tool:'beltL',  icon:'⏪', label:'band',   title:'Rullband vänster'},
+    {tool:'beltR',  icon:'⏩', label:'band',   title:'Rullband höger'},
+  ],
+  foremal: [
+    {tool:'coin',  icon:'🟡', label:'mynt',  title:'Mynt'},
+    {tool:'chest', icon:'🎁', label:'kista', title:'Skattkista'},
+    {tool:'spike', icon:'🔺', label:'tagg',  title:'Taggar'},
+  ],
+  fiender: [
+    {tool:'enemy1', icon:'👾', label:'kryp', title:'Krypare (patrullerar)'},
+    {tool:'enemy2', icon:'🐸', label:'hopp', title:'Hoppare (studsar)'},
+    {tool:'enemy3', icon:'🦇', label:'flyg', title:'Flygare (svävar)'},
+  ],
+  bana: [
+    {tool:'start', icon:'🚩', label:'start', title:'Start'},
+    {tool:'goal',  icon:'🏁', label:'mål',   title:'Mål'},
+    {tool:'erase', icon:'🧽', label:'sudda', title:'Sudda'},
+  ],
+};
+const toolRow=document.getElementById('toolRow');
+let activeCat='mark';
+
+// Bygg upp verktygsraden för vald grupp
+function renderToolRow(){
+  toolRow.innerHTML='';
+  TOOL_GROUPS[activeCat].forEach(t=>{
+    const el=document.createElement('div');
+    el.className='tool'+(t.tool===currentTool?' active':'');
+    el.dataset.tool=t.tool;
+    el.title=t.title;
+    el.innerHTML=t.icon+'<small>'+t.label+'</small>';
+    el.addEventListener('click', ()=>{
+      currentTool=t.tool;
+      toolRow.querySelectorAll('.tool').forEach(x=>x.classList.remove('active'));
+      el.classList.add('active');
+    });
+    toolRow.appendChild(el);
+  });
+}
+// Kategoriknappar
+document.querySelectorAll('.cat').forEach(c=>{
+  c.addEventListener('click', ()=>{
+    activeCat=c.dataset.cat;
+    document.querySelectorAll('.cat').forEach(x=>x.classList.remove('active'));
+    c.classList.add('active');
+    // välj automatiskt första verktyget i gruppen
+    currentTool=TOOL_GROUPS[activeCat][0].tool;
+    renderToolRow();
   });
 });
+renderToolRow();
+
 document.getElementById('bClear').addEventListener('click', ()=>{
   if(confirm('Rensa hela banan? (golvet återställs)')){
     map = blankMap(cols);
@@ -616,7 +679,7 @@ function decodeMap(s, c){
 }
 
 // ---------- Lägesbyte ----------
-const palette=document.getElementById('palette');
+const palette=document.getElementById('paletteWrap');
 const playctl=document.getElementById('playctl');
 const levelbar=document.getElementById('levelbar');
 const mBuild=document.getElementById('mBuild');
