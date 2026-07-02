@@ -848,10 +848,11 @@ function WalkieTalkieScreen({playerName, onBack}) {
 
       {/* PTT Button */}
       <div style={{textAlign:"center",marginBottom:20}}>
-        <button
-          onTouchStart={startRecording} onTouchEnd={stopRecording}
+        <div
+          onTouchStart={(e)=>{e.preventDefault();e.stopPropagation();startRecording(e);}}
+          onTouchEnd={(e)=>{e.preventDefault();e.stopPropagation();stopRecording(e);}}
+          onTouchCancel={(e)=>{e.preventDefault();stopRecording(e);}}
           onMouseDown={startRecording} onMouseUp={stopRecording}
-          disabled={!isReady && !isRecording}
           style={{
             width:140,height:140,borderRadius:"50%",
             background:isRecording?"#e94560":isReady?"#27ae60":"#333",
@@ -861,15 +862,18 @@ function WalkieTalkieScreen({playerName, onBack}) {
             transition:"all 0.15s",
             display:"flex",alignItems:"center",justifyContent:"center",
             margin:"0 auto",
+            userSelect:"none",WebkitUserSelect:"none",
+            WebkitTouchCallout:"none",
+            touchAction:"none",
           }}
         >
           {isRecording?"🔴":"🎙️"}
-        </button>
+        </div>
         <div style={{fontFamily:"'Fredoka One',cursive",fontSize:16,color:isRecording?"#e94560":isReady?"#27ae60":"#8892b0",marginTop:12}}>
-          {isRecording?"SÄNDER...":isReady?"Håll in för att tala":status==="connecting"?"Ansluter...":"Frånkopplad"}
+          {isRecording?"🔴 SÄNDER...":isReady?"Tryck och håll för att tala":status==="connecting"?"Ansluter...":"Frånkopplad"}
         </div>
         <div style={{color:"#8892b0",fontSize:12,marginTop:4}}>
-          {isReady?"Tryck och håll — släpp för att skicka":""}
+          {isReady?"Håll inne — släpp för att skicka":""}
         </div>
       </div>
 
@@ -888,20 +892,6 @@ function WalkieTalkieScreen({playerName, onBack}) {
           ))}
         </div>
       )}
-    </div>
-  );
-}
-
-
-// ===== KLOSSBYGGET =====
-function KlossbyggetScreen({onBack}) {
-  return (
-    <div style={{position:"fixed",inset:0,background:"#12192b",display:"flex",flexDirection:"column",zIndex:100}}>
-      <div style={{display:"flex",alignItems:"center",gap:10,padding:"8px 12px",background:"#1a2438",borderBottom:"2px solid #38496b",flexShrink:0}}>
-        <button onClick={onBack} style={{background:"none",border:"2px solid #8892b0",borderRadius:10,color:"#8892b0",padding:"6px 12px",cursor:"pointer",fontFamily:"'Nunito',sans-serif",whiteSpace:"nowrap"}}>← Hem</button>
-        <span style={{fontFamily:"'Fredoka One',cursive",color:"#f0d264",fontSize:20}}>🧱 Klossbygget</span>
-      </div>
-      <iframe src="./klossbygget.html" style={{flex:1,border:"none",width:"100%"}} allow="autoplay"/>
     </div>
   );
 }
@@ -1030,7 +1020,6 @@ function App(){
           <HomeScreen onSelect={setScreen} scores={sessionScores}/>
           <div style={{maxWidth:480,margin:"0 auto",padding:"0 16px 16px"}}>
             <button onClick={()=>setScreen("highscore")} style={btnStyle(theme.gold)}>🏆 Visa Highscore</button>
-            <button onClick={()=>setScreen("klossbygget")} style={{...btnStyle("#f0d264",true),marginTop:8,color:"#1a2438"}}>🧱 Klossbygget</button>
             <button onClick={()=>setScreen("walkie")} style={{...btnStyle("#e67e22",true),marginTop:8}}>📻 Walkie-Talkie</button>
             <button onClick={()=>setScreen("setup")} style={{...btnStyle(theme.muted,true),background:"none",border:`2px solid ${theme.muted}`,boxShadow:"none",marginTop:8}}>👤 Byt spelare</button>
           </div>
@@ -1038,7 +1027,6 @@ function App(){
       )}
       {screen==="highscore"&&<HighscoreScreen highscores={highscores} currentPlayer={player} onBack={()=>setScreen("home")}/>}
       {screen==="walkie"&&<WalkieTalkieScreen playerName={player} onBack={()=>setScreen("home")}/>}
-      {screen==="klossbygget"&&<KlossbyggetScreen onBack={()=>setScreen("home")}/>}
       {gameInfo&&gameMap[screen]&&(
         <GameWrapper title={gameInfo.label} emoji={gameInfo.emoji} color={gameInfo.color} onBack={()=>setScreen("home")}>
           {gameMap[screen]}
