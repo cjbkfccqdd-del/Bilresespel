@@ -1,0 +1,1426 @@
+<!DOCTYPE html>
+<html lang="sv">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<title>Klossbygget</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; -webkit-user-select:none; user-select:none; touch-action:none; }
+  :root{
+    --sky1:#2a3b5e; --sky2:#4a6b9c; --ground:#c98a4b; --ground-d:#a06630;
+    --hero:#f0d264; --hero-d:#c9a838; --accent:#ff5d5d; --panel:#1a2438; --panel-line:#38496b;
+    --text:#e8eef7; --muted:#8fa3c4; --good:#5ad18a;
+  }
+  html,body{ height:100%; width:100%; overflow:hidden; background:#12192b; font-family:'Trebuchet MS',system-ui,sans-serif; color:var(--text); }
+  #wrap{ position:fixed; inset:0; display:flex; flex-direction:column; max-width:100vw; overflow:hidden; }
+  canvas{ display:block; width:100%; flex:1 1 0; min-height:0; background:linear-gradient(180deg,var(--sky1),var(--sky2)); touch-action:none; }
+
+  /* Topbar */
+  #top{ flex:0 0 auto; display:flex; align-items:center; gap:8px; padding:8px 10px; padding-top:max(8px,env(safe-area-inset-top)); background:var(--panel); border-bottom:2px solid var(--panel-line); overflow-x:auto; }
+  #top h1{ flex:0 0 auto; font-size:16px; letter-spacing:.5px; color:var(--hero); text-shadow:0 2px 0 #0006; margin-right:auto; white-space:nowrap; }
+  #top h1 span{ color:var(--accent); }
+  .pill{ flex:0 0 auto; font-size:12px; color:var(--muted); background:#0d1424; padding:5px 9px; border-radius:20px; border:1px solid var(--panel-line); white-space:nowrap; }
+  /* tunn, diskret scrollbar för scrollbara rader */
+  #top, #levelbar, #palette{ scrollbar-width:thin; scrollbar-color:var(--panel-line) transparent; }
+  #top::-webkit-scrollbar, #levelbar::-webkit-scrollbar, #palette::-webkit-scrollbar{ height:4px; }
+  #top::-webkit-scrollbar-thumb, #levelbar::-webkit-scrollbar-thumb, #palette::-webkit-scrollbar-thumb{ background:var(--panel-line); border-radius:4px; }
+
+  /* Mode toggle */
+  .modebtn{ flex:0 0 auto; font-size:13px; font-weight:bold; padding:8px 12px; border-radius:10px; border:2px solid var(--panel-line);
+    background:#0d1424; color:var(--text); cursor:pointer; white-space:nowrap; }
+  .modebtn.active{ background:var(--hero); color:#3a2c00; border-color:var(--hero-d); }
+
+  /* Builder palette */
+  #palette{ flex:0 0 auto; display:flex; gap:6px; padding:8px 10px; background:var(--panel); border-top:2px solid var(--panel-line);
+    overflow-x:auto; align-items:center; padding-bottom:max(8px,env(safe-area-inset-bottom)); }
+  #palette.hidden{ display:none; }
+  .tool{ flex:0 0 auto; width:48px; height:48px; border-radius:10px; border:2px solid var(--panel-line); background:#0d1424;
+    display:flex; align-items:center; justify-content:center; font-size:22px; cursor:pointer; position:relative; }
+  .tool.active{ border-color:var(--hero); box-shadow:0 0 0 2px var(--hero) inset; }
+  .tool small{ position:absolute; bottom:-2px; font-size:8px; color:var(--muted); }
+  .sep{ width:2px; height:34px; background:var(--panel-line); flex:0 0 auto; margin:0 2px; }
+  .txtbtn{ flex:0 0 auto; font-size:11px; padding:6px 10px; border-radius:8px; border:1px solid var(--panel-line);
+    background:#0d1424; color:var(--muted); cursor:pointer; }
+  .txtbtn.warn{ color:var(--accent); border-color:#5a2b2b; }
+
+  /* Play controls */
+  #playctl{ position:absolute; bottom:0; left:0; right:0; display:flex; justify-content:space-between; align-items:flex-end;
+    padding:16px; padding-bottom:max(20px,env(safe-area-inset-bottom)); pointer-events:none; }
+  #playctl.hidden{ display:none; }
+  .dpad{ display:flex; gap:12px; pointer-events:auto; }
+  .dbtn, .jbtn{ pointer-events:auto; border:none; border-radius:50%; color:#fff; font-size:26px; font-weight:bold;
+    display:flex; align-items:center; justify-content:center; box-shadow:0 4px 0 #0007; }
+  .dbtn{ width:64px; height:64px; background:#ffffff22; border:2px solid #ffffff44; }
+  .dbtn:active{ transform:translateY(3px); box-shadow:0 1px 0 #0007; }
+  .jbtn{ width:82px; height:82px; background:var(--accent); border:2px solid #ff8a8a; font-size:15px; }
+  .jbtn:active{ transform:translateY(3px); box-shadow:0 1px 0 #0007; }
+  .rpad{ display:flex; align-items:flex-end; gap:12px; pointer-events:none; }
+  .climb{ display:flex; flex-direction:column; gap:8px; pointer-events:auto; }
+  .dbtn.small{ width:52px; height:52px; font-size:20px; }
+  @media (hover:hover){ canvas{ cursor:crosshair; } }
+
+  /* Toast */
+  #toast{ position:absolute; top:12px; left:50%; transform:translateX(-50%); background:#000a; color:#fff;
+    padding:8px 16px; border-radius:20px; font-size:13px; opacity:0; transition:opacity .3s; pointer-events:none; z-index:20; }
+  #toast.show{ opacity:1; }
+
+  /* Win overlay */
+  #win{ position:absolute; inset:0; background:#0d1424ee; display:none; flex-direction:column; align-items:center;
+    justify-content:center; gap:14px; z-index:30; text-align:center; padding:24px; }
+  #win.show{ display:flex; }
+  #win h2{ font-size:32px; color:var(--good); text-shadow:0 3px 0 #0007; }
+  #win p{ color:var(--muted); }
+  #win button{ margin-top:8px; font-size:16px; font-weight:bold; padding:12px 28px; border-radius:12px; border:none;
+    background:var(--hero); color:#3a2c00; cursor:pointer; }
+
+  /* Level bar */
+  #levelbar{ flex:0 0 auto; display:flex; align-items:center; gap:8px; padding:6px 10px; background:#141c2e;
+    border-bottom:2px solid var(--panel-line); overflow-x:auto; }
+  #levelbar.hidden{ display:none; }
+  #lvLabel{ font-size:13px; color:var(--text); font-weight:bold; min-width:96px; text-align:center; }
+  .lvlbtn{ flex:0 0 auto; font-size:13px; padding:6px 12px; border-radius:8px; border:1px solid var(--panel-line);
+    background:#0d1424; color:var(--text); cursor:pointer; white-space:nowrap; }
+  .lvlbtn.add{ color:var(--good); border-color:#2f6b48; }
+  .lvlbtn.warn{ color:var(--accent); border-color:#5a2b2b; }
+
+  /* Generic overlay */
+  .overlay{ position:absolute; inset:0; background:#0d1424f2; display:none; flex-direction:column; align-items:center;
+    justify-content:center; gap:16px; z-index:40; text-align:center; padding:24px; overflow-y:auto; }
+  .overlay.show{ display:flex; }
+  .overlay h2{ font-size:26px; text-shadow:0 3px 0 #0007; }
+  .ovbtn{ font-size:15px; font-weight:bold; padding:11px 22px; border-radius:10px; border:none;
+    background:var(--hero); color:#3a2c00; cursor:pointer; }
+  .ovbtn.ghost{ background:#0d1424; color:var(--muted); border:1px solid var(--panel-line); }
+  .ovrow{ display:flex; gap:10px; flex-wrap:wrap; justify-content:center; }
+
+  /* Character cards */
+  .cards{ display:flex; gap:14px; flex-wrap:wrap; justify-content:center; max-width:640px; }
+  .card{ width:180px; background:#182136; border:2px solid var(--panel-line); border-radius:16px; padding:16px 14px;
+    cursor:pointer; transition:transform .1s, border-color .1s; }
+  .card:hover{ transform:translateY(-3px); }
+  .card.sel{ border-color:var(--hero); box-shadow:0 0 0 2px var(--hero) inset; }
+  .card h3{ margin:8px 0 4px; font-size:17px; color:var(--hero); }
+  .card p{ font-size:12px; color:var(--muted); line-height:1.4; }
+  .cface{ width:64px; height:72px; margin:0 auto; }
+  .cface canvas{ width:64px; height:72px; }
+
+  #saveText{ width:min(90vw,520px); height:120px; resize:vertical; border-radius:10px; border:1px solid var(--panel-line);
+    background:#0d1424; color:var(--text); padding:10px; font-family:monospace; font-size:12px; }
+
+  .canvaswrap{ position:relative; flex:1 1 0; min-height:0; display:flex; }
+
+  /* Mobil: krymp menyerna så de får plats utan att sticka ut */
+  @media (max-width:560px){
+    #top{ gap:6px; padding:6px 8px; }
+    #top h1{ font-size:14px; }
+    #hint{ display:none; }
+    .modebtn{ font-size:12px; padding:7px 9px; }
+    #levelbar{ gap:6px; padding:5px 8px; }
+    .lvlbtn{ font-size:12px; padding:6px 9px; }
+    #lvLabel{ min-width:78px; font-size:12px; }
+    #palette{ gap:5px; padding:7px 8px; }
+    .tool{ width:44px; height:44px; font-size:20px; }
+    .txtbtn{ font-size:10px; padding:6px 8px; }
+    .card{ width:150px; }
+  }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <div id="top">
+    <h1>KLOSS<span>bygget</span></h1>
+    <span class="pill" id="hint">Bygg din bana</span>
+    <button class="modebtn active" id="mBuild">🔨 Bygg</button>
+    <button class="modebtn" id="mPlay">▶ Spela</button>
+    <button class="modebtn" id="mChar" title="Välj gubbe">🦸</button>
+    <button class="modebtn" id="mSave" title="Spara/Ladda">💾</button>
+  </div>
+
+  <div id="levelbar">
+    <button class="lvlbtn" id="lvPrev">◀</button>
+    <span id="lvLabel">Bana 1 / 1</span>
+    <button class="lvlbtn" id="lvNext">▶</button>
+    <button class="lvlbtn add" id="lvAdd">＋ Ny bana</button>
+    <button class="lvlbtn warn" id="lvDel">🗑</button>
+  </div>
+
+  <div class="canvaswrap">
+    <canvas id="game"></canvas>
+    <div id="playctl" class="hidden">
+      <div class="dpad">
+        <button class="dbtn" id="bLeft">◀</button>
+        <button class="dbtn" id="bRight">▶</button>
+      </div>
+      <div class="rpad">
+        <div class="climb">
+          <button class="dbtn small" id="bUp">▲</button>
+          <button class="dbtn small" id="bDown">▼</button>
+        </div>
+        <button class="jbtn" id="bJump">HOPP</button>
+      </div>
+    </div>
+    <div id="toast"></div>
+    <div id="win">
+      <h2>MÅLET!</h2>
+      <p id="winsub">Snyggt spelat.</p>
+      <button id="winBtn">Tillbaka till bygget</button>
+    </div>
+
+    <div id="charSel" class="overlay">
+      <h2 style="color:var(--hero)">Välj din gubbe</h2>
+      <div class="cards">
+        <div class="card" data-char="runner">
+          <div class="cface" id="cfaceR"></div>
+          <h3>Springaren</h3>
+          <p>Snabb på foten och kvick i klättringen. Lite lägre hopp.</p>
+        </div>
+        <div class="card" data-char="jumper">
+          <div class="cface" id="cfaceJ"></div>
+          <h3>Hopparen</h3>
+          <p>Högt hopp och <b>dubbelhopp</b> i luften. Normal fart.</p>
+        </div>
+        <div class="card" data-char="tank">
+          <div class="cface" id="cfaceT"></div>
+          <h3>Tanken</h3>
+          <p>Börjar med <b>2 extra liv</b> och är tålig. Lite långsammare.</p>
+        </div>
+      </div>
+      <button id="charClose" class="ovbtn">Klar</button>
+    </div>
+
+    <div id="saveSel" class="overlay">
+      <h2 style="color:var(--hero)">Spara / Ladda bygge</h2>
+      <p style="color:var(--muted);max-width:520px">Kopiera koden nedan och spara den någonstans. Klistra in en sparad kod och tryck Ladda för att återställa alla dina banor.</p>
+      <textarea id="saveText" spellcheck="false" placeholder="Din sparkod hamnar här..."></textarea>
+      <div class="ovrow">
+        <button id="btnExport" class="ovbtn">⟱ Skapa kod</button>
+        <button id="btnCopy" class="ovbtn">⎘ Kopiera</button>
+        <button id="btnImport" class="ovbtn">⟰ Ladda kod</button>
+        <button id="saveClose" class="ovbtn ghost">Stäng</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="palette">
+    <div class="tool active" data-tool="ground" title="Mark">🟫<small>mark</small></div>
+    <div class="tool" data-tool="brick" title="Kloss">🧱<small>kloss</small></div>
+    <div class="tool" data-tool="spike" title="Taggar">🔺<small>tagg</small></div>
+    <div class="tool" data-tool="bounce" title="Studsmatta">🟢<small>studs</small></div>
+    <div class="tool" data-tool="ladder" title="Stege">🪜<small>stege</small></div>
+    <div class="tool" data-tool="slideL" title="Rutschkana vänster">↙️<small>rutsch</small></div>
+    <div class="tool" data-tool="slideR" title="Rutschkana höger">↘️<small>rutsch</small></div>
+    <div class="tool" data-tool="coin" title="Mynt">🟡<small>mynt</small></div>
+    <div class="tool" data-tool="chest" title="Skattkista">🎁<small>kista</small></div>
+    <div class="tool" data-tool="beltL" title="Rullband vänster">⏪<small>band</small></div>
+    <div class="tool" data-tool="beltR" title="Rullband höger">⏩<small>band</small></div>
+    <div class="tool" data-tool="enemy1" title="Krypare (patrullerar)">👾<small>kryp</small></div>
+    <div class="tool" data-tool="enemy2" title="Hoppare (studsar)">🐸<small>hopp</small></div>
+    <div class="tool" data-tool="enemy3" title="Flygare (svävar)">🦇<small>flyg</small></div>
+    <div class="tool" data-tool="start" title="Start">🚩<small>start</small></div>
+    <div class="tool" data-tool="goal" title="Mål">🏁<small>mål</small></div>
+    <div class="tool" data-tool="erase" title="Sudda">🧽<small>sudda</small></div>
+    <div class="sep"></div>
+    <button class="txtbtn" id="bWiden">＋ Bredare</button>
+    <button class="txtbtn warn" id="bClear">Rensa</button>
+  </div>
+</div>
+
+<script>
+(function(){
+"use strict";
+
+const TILE = 40;               // rutstorlek i världskoordinater
+let cols = 40, rows = 12;      // banans storlek i rutor
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+
+// Bana: map[y][x] = typ ('ground','brick','spike','coin', null). Start/mål separat.
+let map = [];
+let startCell = {x:2, y:8};
+let goalCell  = {x:36, y:8};
+function blankMap(w){
+  const c = w||40;
+  const m=[];
+  for(let y=0;y<rows;y++){ m.push(new Array(c).fill(null)); }
+  for(let x=0;x<c;x++){ m[rows-1][x]='ground'; m[rows-2][x]='ground'; }
+  return m;
+}
+
+// ---- Banpaket (flera banor i följd) ----
+let levels = [];          // [{map, cols, start:{x,y}, goal:{x,y}}]
+let currentLevel = 0;     // vilken bana som redigeras/spelas
+let playLevel = 0;        // vilken bana som spelas just nu
+
+function newLevelObj(w){
+  return { map: blankMap(w), cols: (w||40), start:{x:2,y:9}, goal:{x:(w||40)-3,y:9} };
+}
+// Ladda banobjekt -> aktiva variabler
+function loadLevel(i){
+  currentLevel = clamp(i,0,levels.length-1);
+  const L=levels[currentLevel];
+  map = L.map; cols = L.cols;
+  startCell = {x:L.start.x, y:L.start.y};
+  goalCell  = {x:L.goal.x,  y:L.goal.y};
+  cam.x=0; cam.y=0;
+  updateLevelLabel();
+}
+// Spara aktiva variabler -> banobjekt
+function commitLevel(){
+  if(!levels[currentLevel]) return;
+  const L=levels[currentLevel];
+  L.map=map; L.cols=cols;
+  L.start={x:startCell.x,y:startCell.y};
+  L.goal={x:goalCell.x,y:goalCell.y};
+}
+function updateLevelLabel(){
+  const el=document.getElementById('lvLabel');
+  if(el) el.textContent='Bana '+(currentLevel+1)+' / '+levels.length;
+}
+
+// ---- Läge ----
+let mode = 'build';   // 'build' | 'play'
+let currentTool = 'ground';
+
+// ---- Kamera ----
+let cam = {x:0, y:0};
+let dpr = 1, vw = 0, vh = 0;
+
+function resize(){
+  dpr = Math.min(window.devicePixelRatio||1, 2);
+  const r = canvas.getBoundingClientRect();
+  vw = r.width; vh = r.height;
+  canvas.width = Math.floor(vw*dpr);
+  canvas.height = Math.floor(vh*dpr);
+  ctx.setTransform(dpr,0,0,dpr,0,0);
+}
+window.addEventListener('resize', resize);
+
+// ---- Karaktärer ----
+const CHARS = {
+  runner: { name:'Springaren', maxvx:6.2, move:1.15, jump:-13.5, ladder:4.5, doubleJump:false, startLives:3, color:'#4fb0f0', capeColor:'#2a7fc0' },
+  jumper: { name:'Hopparen', maxvx:4.6, move:0.9, jump:-16.5, ladder:3, doubleJump:true, startLives:3, color:'#5ad18a', capeColor:'#2f9d63' },
+  tank:   { name:'Tanken', maxvx:3.6, move:0.75, jump:-13, ladder:2.6, doubleJump:false, startLives:5, color:'#e0793a', capeColor:'#b0551f' }
+};
+let chosenChar = 'jumper';
+
+// ---- Spelare ----
+const player = {
+  x:0, y:0, w:26, h:34, vx:0, vy:0, onGround:false, face:1, dead:false, animT:0, onLadder:false,
+  jumpsLeft:0
+};
+let coinsTotal=0, coinsGot=0, coinsBank=0;   // coinsBank = mynt från tidigare klarade banor
+let enemies=[];
+let chests=[];          // {cx,cy,opened,isTrap}
+let lives=3;
+const MAX_LIVES=5;
+let invuln=0;           // osårbarhets-frames efter träff
+const input = { left:false, right:false, jump:false, jumpQueued:false, up:false, down:false };
+
+function charDef(){ return CHARS[chosenChar]||CHARS.jumper; }
+
+// Starta hela spelomgången från bana 0 (vid Spela-tryck)
+function startPlaythrough(){
+  playLevel = 0;
+  lives = charDef().startLives;
+  coinsBank = 0;
+  loadPlayLevel(playLevel);
+}
+// Ladda en bana för SPEL (behåller liv och sparade mynt)
+function loadPlayLevel(i){
+  playLevel = i;
+  const L = levels[i];
+  startCell = {x:L.start.x, y:L.start.y};
+  goalCell  = {x:L.goal.x,  y:L.goal.y};
+  respawn();   // respawn bygger en färsk kopia av banan
+}
+// gammalt namn (kallas från setMode) -> starta hela genomspelningen
+function startLevel(){ startPlaythrough(); }
+
+// Flytta spelaren till start på nuvarande spelbana (behåll liv, sparad myntbank)
+function respawn(){
+  // återställ en färsk kopia av banan (mynt/kistor tillbaka vid nytt försök)
+  const L=levels[playLevel];
+  map = L.map.map(row=>row.slice());
+  cols = L.cols;
+  chests=[];
+  player.x = startCell.x*TILE + (TILE-player.w)/2;
+  player.y = startCell.y*TILE + (TILE-player.h);
+  player.vx=0; player.vy=0; player.onGround=false; player.dead=false; player.onLadder=false;
+  player.jumpsLeft = charDef().doubleJump ? 2 : 1;
+  invuln=60;
+  coinsGot=0; coinsTotal=0;
+  enemies=[];
+  for(let y=0;y<rows;y++)for(let x=0;x<cols;x++){
+    if(map[y][x]==='coin') coinsTotal++;
+    if(map[y][x]==='chest'){ chests.push({cx:x, cy:y, opened:false, isTrap:Math.random()<0.35}); }
+    spawnEnemyAt(x,y);
+  }
+}
+function spawnEnemyAt(x,y){
+  const t=map[y][x];
+  if(t==='enemy1'){ enemies.push({type:1, x:x*TILE+7, y:y*TILE+6, w:26, h:30, vx:1.3, vy:0, dir:-1, dead:false, anim:0}); }
+  else if(t==='enemy2'){ enemies.push({type:2, x:x*TILE+7, y:y*TILE+6, w:28, h:26, vx:0, vy:0, dir:-1, dead:false, anim:0, jumpTimer:30+Math.random()*40, homeY:y*TILE+6}); }
+  else if(t==='enemy3'){ enemies.push({type:3, x:x*TILE+6, y:y*TILE+6, w:28, h:24, vx:1.6, vy:0, dir:-1, dead:false, anim:0, baseY:y*TILE+6, phase:Math.random()*6.28}); }
+}
+function resetPlayer(){ startPlaythrough(); }
+function chestAt(cx,cy){ return chests.find(c=>c.cx===cx && c.cy===cy); }
+
+// ---------- Ljud (Web Audio) ----------
+let AC=null;
+function ac(){ if(!AC){ try{ AC=new (window.AudioContext||window.webkitAudioContext)(); }catch(e){} } return AC; }
+function beep(freq, dur, type, vol){
+  const a=ac(); if(!a) return;
+  const o=a.createOscillator(), g=a.createGain();
+  o.type=type||'square'; o.frequency.value=freq;
+  g.gain.value=vol||0.06;
+  o.connect(g); g.connect(a.destination);
+  const t=a.currentTime;
+  g.gain.setValueAtTime(g.gain.value,t);
+  g.gain.exponentialRampToValueAtTime(0.0001,t+dur);
+  o.start(t); o.stop(t+dur);
+}
+const sJump = ()=>{ beep(520,0.12,'square',0.05); setTimeout(()=>beep(760,0.09,'square',0.04),40); };
+const sCoin = ()=>{ beep(880,0.07,'triangle',0.06); setTimeout(()=>beep(1180,0.1,'triangle',0.05),60); };
+const sDie  = ()=>{ beep(300,0.15,'sawtooth',0.06); setTimeout(()=>beep(180,0.25,'sawtooth',0.06),120); };
+const sWin  = ()=>{ [523,659,784,1046].forEach((f,i)=>setTimeout(()=>beep(f,0.16,'triangle',0.06),i*110)); };
+const sTick = ()=>{ beep(660,0.03,'square',0.03); };
+const sBounce = ()=>{ beep(300,0.08,'sine',0.06); setTimeout(()=>beep(900,0.14,'sine',0.06),50); };
+const sStomp  = ()=>{ beep(200,0.06,'square',0.06); setTimeout(()=>beep(500,0.1,'square',0.05),40); };
+const sTreasure = ()=>{ [660,880,1100,1320].forEach((f,i)=>setTimeout(()=>beep(f,0.1,'triangle',0.06),i*70)); };
+const sTrap = ()=>{ beep(160,0.18,'sawtooth',0.07); setTimeout(()=>beep(110,0.22,'sawtooth',0.06),90); };
+const sHurt = ()=>{ beep(240,0.1,'square',0.06); setTimeout(()=>beep(160,0.14,'square',0.05),70); };
+const sLife = ()=>{ beep(700,0.09,'sine',0.06); setTimeout(()=>beep(1050,0.12,'sine',0.06),80); };
+
+// ---------- Toast ----------
+let toastT=0;
+const toastEl=document.getElementById('toast');
+function toast(msg){ toastEl.textContent=msg; toastEl.classList.add('show'); clearTimeout(toastT); toastT=setTimeout(()=>toastEl.classList.remove('show'),1400); }
+
+// ---------- Bygg-inmatning ----------
+let pointerDown=false, lastCell=null, panning=false, panStart=null, camStart=null;
+
+function screenToWorld(sx, sy){ return { x: sx+cam.x, y: sy+cam.y }; }
+function worldToCell(wx, wy){ return { x: Math.floor(wx/TILE), y: Math.floor(wy/TILE) }; }
+function inBounds(c){ return c.x>=0 && c.x<cols && c.y>=0 && c.y<rows; }
+
+function applyTool(cell){
+  if(!inBounds(cell)) return;
+  const {x,y}=cell;
+  if(currentTool==='erase'){ map[y][x]=null;
+    if(startCell.x===x&&startCell.y===y){} // start/mål suddas ej av misstag
+    return;
+  }
+  if(currentTool==='start'){ startCell={x,y}; if(map[y][x] && map[y][x]!=='ground' && map[y][x]!=='brick') map[y][x]=null; return; }
+  if(currentTool==='goal'){ goalCell={x,y}; if(map[y][x] && map[y][x]!=='ground' && map[y][x]!=='brick') map[y][x]=null; return; }
+  map[y][x]=currentTool;
+}
+
+function handleBuildAt(sx, sy){
+  const w = screenToWorld(sx, sy);
+  const cell = worldToCell(w.x, w.y);
+  if(!inBounds(cell)) return;
+  const key = cell.x+','+cell.y;
+  if(key===lastCell) return;
+  lastCell=key;
+  applyTool(cell);
+  sTick();
+}
+
+// ---------- Canvas pointer events ----------
+function getPos(e){
+  const r=canvas.getBoundingClientRect();
+  const t=e.touches?e.touches[0]:e;
+  return { x:t.clientX-r.left, y:t.clientY-r.top };
+}
+let touchCount=0, spaceHeld=false;
+canvas.addEventListener('touchstart', e=>{ touchCount=e.touches.length; onDown(e); }, {passive:false});
+canvas.addEventListener('touchmove', e=>{ onMove(e); }, {passive:false});
+canvas.addEventListener('touchend', e=>{ touchCount=e.touches.length; onUp(e); }, {passive:false});
+canvas.addEventListener('mousedown', onDown);
+canvas.addEventListener('mousemove', onMove);
+window.addEventListener('mouseup', onUp);
+// högerklicksmeny av på canvas (används för panorering)
+canvas.addEventListener('contextmenu', e=>{ if(mode==='build') e.preventDefault(); });
+// mushjul panorerar/scrollar banan på dator
+canvas.addEventListener('wheel', e=>{
+  if(mode!=='build') return;
+  e.preventDefault();
+  if(e.shiftKey){ cam.y = clamp(cam.y+e.deltaY, 0, Math.max(0,rows*TILE-vh)); }
+  else { cam.x = clamp(cam.x + (e.deltaX||0) + e.deltaY, 0, Math.max(0,cols*TILE-vw)); }
+}, {passive:false});
+// mellanslag = panoreringsläge på dator
+window.addEventListener('keydown', e=>{ if(e.code==='Space' && mode==='build') spaceHeld=true; });
+window.addEventListener('keyup', e=>{ if(e.code==='Space') spaceHeld=false; });
+
+function isPanEvent(e){
+  // pekskärm: 2 fingrar. Mus: höger/mitten-knapp, eller mellanslag + vänster
+  if(e.touches) return e.touches.length>=2;
+  return e.button===1 || e.button===2 || (e.button===0 && spaceHeld);
+}
+
+function onDown(e){
+  ac();
+  if(mode!=='build') return;
+  e.preventDefault();
+  const p=getPos(e);
+  if(isPanEvent(e)){ panning=true; panStart={x:p.x,y:p.y}; camStart={x:cam.x,y:cam.y}; canvas.style.cursor='grabbing'; return; }
+  pointerDown=true; lastCell=null;
+  handleBuildAt(p.x,p.y);
+}
+function onMove(e){
+  if(mode!=='build') return;
+  const p=getPos(e);
+  if(panning){
+    e.preventDefault();
+    cam.x = clamp(camStart.x-(p.x-panStart.x), 0, Math.max(0,cols*TILE-vw));
+    cam.y = clamp(camStart.y-(p.y-panStart.y), 0, Math.max(0,rows*TILE-vh));
+    return;
+  }
+  if(pointerDown){ e.preventDefault(); handleBuildAt(p.x,p.y); }
+}
+function onUp(e){
+  if(e.touches && e.touches.length>0) return;
+  pointerDown=false; panning=false; lastCell=null; canvas.style.cursor='';
+}
+
+function clamp(v,a,b){ return v<a?a:(v>b?b:v); }
+
+// ---------- Palettknappar ----------
+document.querySelectorAll('.tool').forEach(t=>{
+  t.addEventListener('click', ()=>{
+    document.querySelectorAll('.tool').forEach(x=>x.classList.remove('active'));
+    t.classList.add('active');
+    currentTool=t.dataset.tool;
+  });
+});
+document.getElementById('bClear').addEventListener('click', ()=>{
+  if(confirm('Rensa hela banan? (golvet återställs)')){
+    map = blankMap(cols);
+    levels[currentLevel].map = map;
+    toast('Banan rensad');
+  }
+});
+document.getElementById('bWiden').addEventListener('click', ()=>{
+  const add=10;
+  for(let y=0;y<rows;y++){ for(let i=0;i<add;i++){ map[y].push(y>=rows-2?'ground':null); } }
+  cols+=add;
+  commitLevel();
+  toast('Banan är nu '+cols+' rutor bred');
+});
+
+// ---------- Bankontroller (flera banor) ----------
+document.getElementById('lvPrev').addEventListener('click', ()=>{
+  if(currentLevel>0){ commitLevel(); loadLevel(currentLevel-1); }
+});
+document.getElementById('lvNext').addEventListener('click', ()=>{
+  if(currentLevel<levels.length-1){ commitLevel(); loadLevel(currentLevel+1); }
+});
+document.getElementById('lvAdd').addEventListener('click', ()=>{
+  commitLevel();
+  levels.push(newLevelObj(40));
+  loadLevel(levels.length-1);
+  toast('Ny bana tillagd (bana '+levels.length+')');
+});
+document.getElementById('lvDel').addEventListener('click', ()=>{
+  if(levels.length<=1){ toast('Kan inte ta bort sista banan'); return; }
+  if(confirm('Ta bort bana '+(currentLevel+1)+'?')){
+    levels.splice(currentLevel,1);
+    loadLevel(Math.min(currentLevel, levels.length-1));
+    toast('Bana borttagen');
+  }
+});
+
+// ---------- Karaktärsval ----------
+const charSel=document.getElementById('charSel');
+document.getElementById('mChar').addEventListener('click', ()=>{ ac(); openCharSel(); });
+document.getElementById('charClose').addEventListener('click', ()=>{ charSel.classList.remove('show'); });
+document.querySelectorAll('.card').forEach(card=>{
+  card.addEventListener('click', ()=>{
+    chosenChar=card.dataset.char;
+    document.querySelectorAll('.card').forEach(c=>c.classList.remove('sel'));
+    card.classList.add('sel');
+    toast('Vald: '+charDef().name);
+  });
+});
+function openCharSel(){
+  charSel.classList.add('show');
+  document.querySelectorAll('.card').forEach(c=>c.classList.toggle('sel', c.dataset.char===chosenChar));
+  drawCharPreviews();
+}
+function drawCharPreviews(){
+  [['runner','cfaceR'],['jumper','cfaceJ'],['tank','cfaceT']].forEach(([key,id])=>{
+    const host=document.getElementById(id);
+    host.innerHTML='';
+    const c=document.createElement('canvas'); c.width=64; c.height=72;
+    host.appendChild(c);
+    const g=c.getContext('2d');
+    drawHeroSprite(g, 32, 40, 26, 34, 1, 0, true, false, key);
+  });
+}
+
+// ---------- Spara / Ladda ----------
+const saveSel=document.getElementById('saveSel');
+document.getElementById('mSave').addEventListener('click', ()=>{ saveSel.classList.add('show'); });
+document.getElementById('saveClose').addEventListener('click', ()=>{ saveSel.classList.remove('show'); });
+document.getElementById('btnExport').addEventListener('click', ()=>{
+  commitLevel();
+  document.getElementById('saveText').value = exportSave();
+  toast('Kod skapad — kopiera och spara den');
+});
+document.getElementById('btnCopy').addEventListener('click', async ()=>{
+  const ta=document.getElementById('saveText');
+  if(!ta.value){ commitLevel(); ta.value=exportSave(); }
+  try{ await navigator.clipboard.writeText(ta.value); toast('Kopierat!'); }
+  catch(e){ ta.select(); document.execCommand('copy'); toast('Kopierat!'); }
+});
+document.getElementById('btnImport').addEventListener('click', ()=>{
+  const txt=document.getElementById('saveText').value.trim();
+  if(!txt){ toast('Klistra in en kod först'); return; }
+  if(importSave(txt)){ saveSel.classList.remove('show'); toast('Bygge laddat!'); }
+  else { toast('Ogiltig kod'); }
+});
+
+function exportSave(){
+  const data={ v:1, char:chosenChar, levels: levels.map(L=>({
+    c:L.cols, s:[L.start.x,L.start.y], g:[L.goal.x,L.goal.y], m:encodeMap(L.map, L.cols)
+  }))};
+  return btoa(unescape(encodeURIComponent(JSON.stringify(data))));
+}
+function importSave(str){
+  try{
+    const data=JSON.parse(decodeURIComponent(escape(atob(str))));
+    if(!data.levels||!data.levels.length) return false;
+    levels = data.levels.map(L=>({
+      cols:L.c, start:{x:L.s[0],y:L.s[1]}, goal:{x:L.g[0],y:L.g[1]}, map:decodeMap(L.m, L.c)
+    }));
+    if(data.char && CHARS[data.char]) chosenChar=data.char;
+    loadLevel(0);
+    return true;
+  }catch(e){ return false; }
+}
+// Kompakt kodning: varje ruta -> ett tecken
+const TILE_CODE={ null:'.', ground:'G', brick:'B', spike:'S', bounce:'U', ladder:'L',
+  slideL:'<', slideR:'>', coin:'C', chest:'H', beltL:'{', beltR:'}', enemy1:'1', enemy2:'2', enemy3:'3' };
+const CODE_TILE={}; Object.keys(TILE_CODE).forEach(k=>CODE_TILE[TILE_CODE[k]]=(k==='null'?null:k));
+function encodeMap(m, c){
+  let s='';
+  for(let y=0;y<rows;y++)for(let x=0;x<c;x++){ s+=TILE_CODE[m[y][x]]||'.'; }
+  return s;
+}
+function decodeMap(s, c){
+  const m=[]; let i=0;
+  for(let y=0;y<rows;y++){ const row=[]; for(let x=0;x<c;x++){ row.push(CODE_TILE[s[i++]]??null); } m.push(row); }
+  return m;
+}
+
+// ---------- Lägesbyte ----------
+const palette=document.getElementById('palette');
+const playctl=document.getElementById('playctl');
+const levelbar=document.getElementById('levelbar');
+const mBuild=document.getElementById('mBuild');
+const mPlay=document.getElementById('mPlay');
+const hint=document.getElementById('hint');
+
+function setMode(m){
+  mode=m;
+  gameOver=false; winning=false; dying=false;
+  document.getElementById('win').classList.remove('show');
+  if(m==='build'){
+    mBuild.classList.add('active'); mPlay.classList.remove('active');
+    palette.classList.remove('hidden'); playctl.classList.add('hidden');
+    levelbar.classList.remove('hidden');
+    // ladda tillbaka den bana vi redigerade
+    loadLevel(currentLevel);
+    hint.textContent='Bygg din bana';
+  }else{
+    mPlay.classList.add('active'); mBuild.classList.remove('active');
+    palette.classList.add('hidden'); playctl.classList.remove('hidden');
+    levelbar.classList.add('hidden');
+    commitLevel();               // spara det man byggt innan spel
+    startPlaythrough();          // börja från bana 1
+    cam.x=clamp(player.x-vw/2,0,Math.max(0,cols*TILE-vw));
+    hint.textContent = levels.length>1 ? ('Bana 1 av '+levels.length+' 🏁') : 'Nå flaggan 🏁';
+    ac();
+  }
+}
+mBuild.addEventListener('click', ()=>setMode('build'));
+mPlay.addEventListener('click', ()=>setMode('play'));
+// Vid game over: spela om från början. Vid vinst: tillbaka till bygget.
+document.getElementById('winBtn').addEventListener('click', ()=>{
+  if(gameOver){ setMode('play'); } else { setMode('build'); }
+});
+
+// ---------- Spelkontroller ----------
+function bindHold(id, on){
+  const el=document.getElementById(id);
+  const set=(v)=>()=>{ on(v); };
+  el.addEventListener('touchstart', e=>{ e.preventDefault(); ac(); on(true); }, {passive:false});
+  el.addEventListener('touchend', e=>{ e.preventDefault(); on(false); }, {passive:false});
+  el.addEventListener('mousedown', e=>{ e.preventDefault(); ac(); on(true); });
+  el.addEventListener('mouseup', ()=>on(false));
+  el.addEventListener('mouseleave', ()=>on(false));
+}
+bindHold('bLeft', v=>input.left=v);
+bindHold('bRight', v=>input.right=v);
+bindHold('bUp', v=>input.up=v);
+bindHold('bDown', v=>input.down=v);
+document.getElementById('bJump').addEventListener('touchstart', e=>{ e.preventDefault(); ac(); input.jumpQueued=true; input.jump=true; }, {passive:false});
+document.getElementById('bJump').addEventListener('touchend', e=>{ e.preventDefault(); input.jump=false; }, {passive:false});
+document.getElementById('bJump').addEventListener('mousedown', e=>{ e.preventDefault(); ac(); input.jumpQueued=true; input.jump=true; });
+document.getElementById('bJump').addEventListener('mouseup', ()=>input.jump=false);
+
+// Tangentbord (dator): piltangenter/WASD + mellanslag hopp
+window.addEventListener('keydown', e=>{
+  if(mode!=='play') return;
+  if(e.code==='ArrowLeft'||e.code==='KeyA') input.left=true;
+  if(e.code==='ArrowRight'||e.code==='KeyD') input.right=true;
+  if(e.code==='ArrowUp'||e.code==='KeyW') input.up=true;
+  if(e.code==='ArrowDown'||e.code==='KeyS') input.down=true;
+  if(e.code==='Space'||e.code==='ArrowUp'||e.code==='KeyW'){ input.jumpQueued=true; input.jump=true; }
+});
+window.addEventListener('keyup', e=>{
+  if(e.code==='ArrowLeft'||e.code==='KeyA') input.left=false;
+  if(e.code==='ArrowRight'||e.code==='KeyD') input.right=false;
+  if(e.code==='ArrowUp'||e.code==='KeyW') input.up=false;
+  if(e.code==='ArrowDown'||e.code==='KeyS') input.down=false;
+  if(e.code==='Space'||e.code==='ArrowUp'||e.code==='KeyW') input.jump=false;
+});
+
+// ---------- Fysik ----------
+const GRAV=0.9, MOVE=0.9, MAXVX=4.6, FRICTION=0.8, JUMP=-14.5, MAXVY=16;
+
+function solidAt(px, py){
+  const cx=Math.floor(px/TILE), cy=Math.floor(py/TILE);
+  if(cx<0||cx>=cols||cy<0||cy>=rows) return false;
+  const t=map[cy][cx];
+  return t==='ground'||t==='brick'||t==='slideL'||t==='slideR'||t==='beltL'||t==='beltR';
+}
+function rectSolid(x,y,w,h){
+  return solidAt(x,y)||solidAt(x+w-1,y)||solidAt(x,y+h-1)||solidAt(x+w-1,y+h-1)||
+         solidAt(x+w/2,y)||solidAt(x+w/2,y+h-1)||solidAt(x,y+h/2)||solidAt(x+w-1,y+h/2);
+}
+function tileTypeAt(px,py){
+  const cx=Math.floor(px/TILE), cy=Math.floor(py/TILE);
+  if(cx<0||cx>=cols||cy<0||cy>=rows) return null;
+  return map[cy][cx];
+}
+// finns en viss typ någonstans i spelarens rektangel?
+function rectHasType(x,y,w,h,type){
+  const x0=Math.floor(x/TILE), x1=Math.floor((x+w-1)/TILE);
+  const y0=Math.floor(y/TILE), y1=Math.floor((y+h-1)/TILE);
+  for(let cy=y0;cy<=y1;cy++)for(let cx=x0;cx<=x1;cx++){
+    if(cx<0||cx>=cols||cy<0||cy>=rows) continue;
+    if(map[cy][cx]===type) return true;
+  }
+  return false;
+}
+
+function hazardOrCoin(){
+  // kolla mynt, taggar & kistor i cellerna spelaren rör
+  const x0=Math.floor(player.x/TILE), x1=Math.floor((player.x+player.w-1)/TILE);
+  const y0=Math.floor(player.y/TILE), y1=Math.floor((player.y+player.h-1)/TILE);
+  for(let cy=y0;cy<=y1;cy++)for(let cx=x0;cx<=x1;cx++){
+    if(cx<0||cx>=cols||cy<0||cy>=rows) continue;
+    const t=map[cy][cx];
+    if(t==='coin'){ map[cy][cx]=null; coinsGot++; sCoin(); }
+    else if(t==='spike'){ die(); return; }
+    else if(t==='chest'){
+      const c=chestAt(cx,cy);
+      if(c && !c.opened){
+        c.opened=true;
+        if(c.isTrap){
+          sTrap(); toast('💥 Fälla!'); hurt();
+          if(player.dead) return;
+        } else {
+          // slumpa belöning: mynt eller extraliv
+          if(Math.random()<0.3 && lives<MAX_LIVES){ lives++; sLife(); toast('❤️ Extraliv!'); }
+          else { const bonus=3+Math.floor(Math.random()*4); coinsGot+=bonus; sTreasure(); toast('💰 Skatt! +'+bonus+' mynt'); }
+        }
+      }
+    }
+  }
+  // mål
+  if(player.x < (goalCell.x+1)*TILE && player.x+player.w > goalCell.x*TILE &&
+     player.y < (goalCell.y+1)*TILE && player.y+player.h > goalCell.y*TILE){
+    winLevel();
+  }
+}
+
+let dying=false, winning=false, gameOver=false;
+
+// Direkt dödlig träff (taggar, gropen): tappa liv och respawna, eller game over
+function die(){
+  if(dying||invuln>0) return;
+  loseLife();
+}
+// Träff som kan tas medan man rör sig (fiende, fälla): knuffa bakåt + i-frames
+function hurt(){
+  if(dying||invuln>0) return;
+  loseLife();
+}
+function loseLife(){
+  lives--;
+  if(lives<=0){
+    dying=true; player.dead=true; sDie();
+    setTimeout(()=>{ showGameOver(); }, 700);
+  } else {
+    dying=true; player.dead=true; sHurt();
+    setTimeout(()=>{
+      dying=false;
+      respawn();
+      cam.x=clamp(player.x-vw/2,0,Math.max(0,cols*TILE-vw));
+    }, 650);
+  }
+}
+function showGameOver(){
+  gameOver=true;
+  document.getElementById('win').classList.add('show');
+  document.querySelector('#win h2').textContent='SLUT';
+  document.querySelector('#win h2').style.color='var(--accent)';
+  document.getElementById('winsub').textContent='Alla liv slut. Försök igen!';
+  document.getElementById('winBtn').textContent='Spela om';
+}
+function winLevel(){
+  if(winning) return; winning=true;
+  coinsBank += coinsGot;   // spara myntet från denna bana
+  const isLast = (playLevel >= levels.length-1);
+  if(!isLast){
+    // Klarat en delbana -> ladda nästa efter en kort paus
+    sWin();
+    toast('✅ Bana '+(playLevel+1)+' klar!');
+    setTimeout(()=>{
+      loadPlayLevel(playLevel+1);
+      cam.x=clamp(player.x-vw/2,0,Math.max(0,cols*TILE-vw));
+      winning=false;
+    }, 900);
+  } else {
+    // Klarat sista banan -> vinstruta
+    sWin();
+    document.querySelector('#win h2').textContent = levels.length>1 ? 'ALLA BANOR KLARA!' : 'MÅLET!';
+    document.querySelector('#win h2').style.color='var(--good)';
+    document.getElementById('winBtn').textContent='Tillbaka till bygget';
+    document.getElementById('winsub').textContent = 'Totalt mynt: '+coinsBank+'  ·  Liv kvar: '+lives;
+    gameOver=false;
+    setTimeout(()=>{ document.getElementById('win').classList.add('show'); winning=false; }, 400);
+  }
+}
+
+const LADDER_SPEED=3, SLIDE_ACCEL=0.9, SLIDE_MAX=8.5, BELT_SPEED=2.2;
+
+function stepPlayer(){
+  if(player.dead) return;
+
+  // Är spelaren på en stege?
+  const cxMid=player.x+player.w/2;
+  player.onLadder = rectHasType(player.x, player.y, player.w, player.h, 'ladder');
+
+  const C = charDef();
+  // horisontellt (fart & acceleration per karaktär)
+  if(input.left){ player.vx-=C.move; player.face=-1; }
+  if(input.right){ player.vx+=C.move; player.face=1; }
+  if(!input.left && !input.right){ player.vx*=FRICTION; if(Math.abs(player.vx)<0.05) player.vx=0; }
+  player.vx=clamp(player.vx,-C.maxvx,C.maxvx);
+
+  // Rutschkana: kolla tilerna precis under fötterna (vänster, mitt, höger)
+  let slideDir=0;
+  const fy=player.y+player.h+3;
+  [player.x+3, player.x+player.w/2, player.x+player.w-3].forEach(fx=>{
+    const b=tileTypeAt(fx,fy);
+    if(b==='slideR') slideDir=1;
+    else if(b==='slideL') slideDir=-1;
+  });
+  if(slideDir!==0 && player.vy>=-0.1){
+    // stark glidfart som får överstiga vanlig maxfart och struntar i friktion
+    player.vx += slideDir*SLIDE_ACCEL;
+    player.vx = clamp(player.vx, -SLIDE_MAX, SLIDE_MAX);
+    player.face = slideDir;
+  }
+
+  if(player.onLadder){
+    // Klättra: neutralisera gravitation, styr med upp/ner
+    if(input.up) player.vy=-C.ladder;
+    else if(input.down) player.vy=C.ladder;
+    else player.vy=0;
+    player.jumpsLeft = C.doubleJump?2:1;
+    // hopp släpper stegen
+    if(input.jumpQueued){ player.vy=C.jump*0.8; player.onLadder=false; sJump(); }
+    input.jumpQueued=false;
+  } else {
+    if(player.onGround) player.jumpsLeft = C.doubleJump?2:1;
+    // hopp (mark, eller extra luft-hopp för Hopparen)
+    if(input.jumpQueued && player.jumpsLeft>0){
+      player.vy=C.jump; player.onGround=false; player.jumpsLeft--; sJump();
+    }
+    input.jumpQueued=false;
+    if(!input.jump && player.vy<-5) player.vy=-5;   // variabel hopphöjd
+    player.vy+=GRAV; player.vy=clamp(player.vy,-MAXVY,MAXVY);
+  }
+
+  // rörelse X med kollision
+  let nx=player.x+player.vx;
+  if(rectSolid(nx,player.y,player.w,player.h)){
+    while(!rectSolid(player.x+Math.sign(player.vx),player.y,player.w,player.h) && Math.abs(nx-player.x)>0.5){
+      player.x+=Math.sign(player.vx);
+    }
+    player.vx=0;
+  } else player.x=nx;
+
+  // rörelse Y med kollision
+  player.onGround=false;
+  let ny=player.y+player.vy;
+  if(rectSolid(player.x,ny,player.w,player.h)){
+    while(!rectSolid(player.x,player.y+Math.sign(player.vy),player.w,player.h) && Math.abs(ny-player.y)>0.5){
+      player.y+=Math.sign(player.vy);
+    }
+    if(player.vy>0) player.onGround=true;
+    player.vy=0;
+  } else player.y=ny;
+
+  // Studsmatta: om vi landar på den, studsa högt
+  if(player.onGround){
+    const bt = tileTypeAt(cxMid, player.y+player.h+2);
+    if(bt==='bounce'){ player.vy=JUMP*1.45; player.onGround=false; sBounce(); }
+    // Rullband: knuffa i bandets riktning när man står på det (om ingen vägg)
+    else if(bt==='beltL' && !rectSolid(player.x-BELT_SPEED,player.y,player.w,player.h)){ player.x-=BELT_SPEED; }
+    else if(bt==='beltR' && !rectSolid(player.x+BELT_SPEED,player.y,player.w,player.h)){ player.x+=BELT_SPEED; }
+  }
+
+  // världsgränser
+  if(player.x<0){ player.x=0; player.vx=0; }
+  if(player.x+player.w>cols*TILE){ player.x=cols*TILE-player.w; player.vx=0; }
+  if(player.y>rows*TILE+200){ die(); return; }  // föll i gropen
+
+  if(invuln>0) invuln--;
+  player.animT += Math.abs(player.vx)*0.05 + (player.onLadder&&(input.up||input.down)?0.15:0);
+  hazardOrCoin();
+  stepEnemies();
+
+  // kamera följer
+  const targetX = clamp(player.x - vw/2 + player.w/2, 0, Math.max(0,cols*TILE-vw));
+  const targetY = clamp(player.y - vh/2 + player.h/2, 0, Math.max(0,rows*TILE-vh));
+  cam.x += (targetX-cam.x)*0.12;
+  cam.y += (targetY-cam.y)*0.12;
+}
+
+// ---------- Fiender ----------
+// type 1 = Krypare (patrullerar mark, vänder vid kant/vägg)
+// type 2 = Hoppare (studsar med jämna mellanrum, kan bara stompas när nere)
+// type 3 = Flygare (svävar i sinusbana, ignorerar gravitation)
+const E_GRAV=0.8;
+function eSolid(x,y,w,h){ return rectSolid(x,y,w,h); }
+function stepEnemies(){
+  for(const e of enemies){
+    if(e.dead) continue;
+    e.anim=(e.anim||0)+0.05;
+
+    if(e.type===3){
+      // Flygare: sväva fram/tillbaka i luften, gunga upp/ner
+      e.phase+=0.05;
+      let nx=e.x+e.dir*Math.abs(e.vx);
+      if(eSolid(nx,e.y,e.w,e.h)){ e.dir*=-1; } else { e.x=nx; }
+      e.y = e.baseY + Math.sin(e.phase)*22;
+    } else {
+      // Krypare & Hoppare har gravitation
+      e.vy+=E_GRAV; if(e.vy>14) e.vy=14;
+
+      if(e.type===2){
+        // Hoppare: räkna ner till nästa hopp när den står på mark
+        if(e.onFloor){
+          e.jumpTimer--;
+          if(e.jumpTimer<=0){ e.vy=-11; e.jumpTimer=45+Math.random()*40; }
+        }
+      }
+
+      // horisontell rörelse
+      let nx=e.x+e.dir*Math.abs(e.vx);
+      if(eSolid(nx,e.y,e.w,e.h)){ e.dir*=-1; }
+      else {
+        const aheadX = e.dir>0 ? nx+e.w+2 : nx-2;
+        const groundAhead = solidAt(aheadX, e.y+e.h+3);
+        // krypare vänder vid stup; hoppare bryr sig inte (kan hoppa över)
+        if(!groundAhead && e.type===1 && e.onFloor){ e.dir*=-1; } else { e.x=nx; }
+      }
+
+      // vertikal rörelse
+      e.onFloor=false;
+      let ny=e.y+e.vy;
+      if(eSolid(e.x,ny,e.w,e.h)){
+        while(!eSolid(e.x,e.y+Math.sign(e.vy),e.w,e.h) && Math.abs(ny-e.y)>0.5){ e.y+=Math.sign(e.vy); }
+        if(e.vy>0) e.onFloor=true;
+        e.vy=0;
+      } else e.y=ny;
+      if(e.y>rows*TILE+300){ e.dead=true; continue; }
+    }
+
+    // kollision med spelare
+    if(!player.dead && rectsOverlap(player.x,player.y,player.w,player.h, e.x,e.y,e.w,e.h)){
+      const stomping = player.vy>1 && (player.y+player.h) < (e.y+e.h*0.6);
+      // Flygare kan inte stompas (man studsar bara av), Hoppare bara när den är nere
+      if(stomping && e.type!==3 && !(e.type===2 && e.vy<-2)){
+        e.dead=true; player.vy=JUMP*0.6; sStomp();
+      } else {
+        hurt(); return;
+      }
+    }
+  }
+}
+function rectsOverlap(ax,ay,aw,ah,bx,by,bw,bh){
+  return ax<bx+bw && ax+aw>bx && ay<by+bh && ay+ah>by;
+}
+
+// ---------- Rendering ----------
+function drawBackground(){
+  // moln-parallax
+  ctx.save();
+  ctx.globalAlpha=0.5;
+  ctx.fillStyle='#ffffff';
+  const off=(cam.x*0.3)%260;
+  for(let i=-1;i<vw/260+2;i++){
+    const bx=i*260-off, by=40+((i*57)%60);
+    cloud(bx,by,34);
+  }
+  ctx.restore();
+  // sol
+  ctx.save(); ctx.globalAlpha=0.8; ctx.fillStyle='#ffe8a0';
+  ctx.beginPath(); ctx.arc(vw-60,60,26,0,7); ctx.fill(); ctx.restore();
+}
+function cloud(x,y,r){
+  ctx.beginPath();
+  ctx.arc(x,y,r,0,7); ctx.arc(x+r,y+6,r*0.8,0,7); ctx.arc(x-r*0.9,y+8,r*0.7,0,7);
+  ctx.rect(x-r,y+2,r*2,r*0.7); ctx.fill();
+}
+
+function drawGrid(){
+  ctx.save();
+  ctx.strokeStyle='#ffffff22'; ctx.lineWidth=1;
+  const x0=Math.floor(cam.x/TILE)*TILE, x1=cam.x+vw;
+  const y0=Math.floor(cam.y/TILE)*TILE, y1=cam.y+vh;
+  ctx.beginPath();
+  for(let x=x0;x<=x1;x+=TILE){ ctx.moveTo(x-cam.x,0); ctx.lineTo(x-cam.x,vh); }
+  for(let y=y0;y<=y1;y+=TILE){ ctx.moveTo(0,y-cam.y); ctx.lineTo(vw,y-cam.y); }
+  ctx.stroke();
+  // banans yttre kant
+  ctx.strokeStyle='#ffffff55'; ctx.lineWidth=2;
+  ctx.strokeRect(-cam.x, -cam.y, cols*TILE, rows*TILE);
+  ctx.restore();
+}
+
+function drawTiles(){
+  const cx0=Math.max(0,Math.floor(cam.x/TILE)), cx1=Math.min(cols-1,Math.floor((cam.x+vw)/TILE));
+  const cy0=Math.max(0,Math.floor(cam.y/TILE)), cy1=Math.min(rows-1,Math.floor((cam.y+vh)/TILE));
+  for(let cy=cy0;cy<=cy1;cy++)for(let cx=cx0;cx<=cx1;cx++){
+    const t=map[cy][cx]; if(!t) continue;
+    const px=cx*TILE-cam.x, py=cy*TILE-cam.y;
+    if(t==='ground'){ tileGround(px,py); }
+    else if(t==='brick'){ tileBrick(px,py); }
+    else if(t==='spike'){ tileSpike(px,py); }
+    else if(t==='coin'){ tileCoin(px,py); }
+    else if(t==='bounce'){ tileBounce(px,py); }
+    else if(t==='ladder'){ tileLadder(px,py); }
+    else if(t==='slideL'){ tileSlide(px,py,-1); }
+    else if(t==='slideR'){ tileSlide(px,py,1); }
+    else if(t==='beltL'){ tileBelt(px,py,-1); }
+    else if(t==='beltR'){ tileBelt(px,py,1); }
+    else if(t==='chest'){ tileChest(px,py,cx,cy); }
+    else if((t==='enemy1'||t==='enemy2'||t==='enemy3') && mode==='build'){ tileEnemyIcon(px,py,t); }
+  }
+}
+function tileBelt(px,py,dir){
+  // ram
+  ctx.fillStyle='#3a3f4a'; ctx.fillRect(px,py+TILE-16,TILE,16);
+  // rullar
+  ctx.fillStyle='#20242c';
+  ctx.beginPath(); ctx.arc(px+9,py+TILE-8,6,0,7); ctx.arc(px+TILE-9,py+TILE-8,6,0,7); ctx.fill();
+  // rörlig yta med pilar
+  ctx.save();
+  ctx.beginPath(); ctx.rect(px,py+TILE-16,TILE,7); ctx.clip();
+  ctx.fillStyle='#5b6270'; ctx.fillRect(px,py+TILE-16,TILE,7);
+  const t=(Date.now()*0.12*dir); 
+  ctx.fillStyle='#8a93a5';
+  for(let i=-1;i<TILE/10+1;i++){
+    const ax=px + (((i*10 + t)%(TILE+10))+(TILE+10))%(TILE+10) - 5;
+    ctx.beginPath();
+    if(dir>0){ ctx.moveTo(ax,py+TILE-15); ctx.lineTo(ax+5,py+TILE-12.5); ctx.lineTo(ax,py+TILE-10); }
+    else { ctx.moveTo(ax+5,py+TILE-15); ctx.lineTo(ax,py+TILE-12.5); ctx.lineTo(ax+5,py+TILE-10); }
+    ctx.closePath(); ctx.fill();
+  }
+  ctx.restore();
+}
+function tileChest(px,py,cx,cy){
+  const c=(mode==='play')?chestAt(cx,cy):null;
+  const opened = c ? c.opened : false;
+  // låda
+  ctx.fillStyle='#7a4a1e'; roundRect(px+5,py+16,TILE-10,TILE-18,4); ctx.fill();
+  ctx.fillStyle='#9a6428'; ctx.fillRect(px+5,py+20,TILE-10,4);
+  if(opened){
+    // öppet lock (uppfällt)
+    ctx.fillStyle='#8a5522'; roundRect(px+5,py+6,TILE-10,10,4); ctx.fill();
+    if(c && !c.isTrap){ ctx.fillStyle=getC('--hero'); ctx.fillRect(px+9,py+18,TILE-18,5); } // guldglimt
+  } else {
+    // stängt lock
+    ctx.fillStyle='#8a5522'; roundRect(px+5,py+10,TILE-10,12,4); ctx.fill();
+  }
+  // gångjärn/lås
+  ctx.fillStyle=getC('--hero-d');
+  ctx.fillRect(px+TILE/2-3, py+(opened?20:16), 6, 6);
+  ctx.strokeStyle='#00000033'; ctx.strokeRect(px+5.5,py+16.5,TILE-11,TILE-19);
+}
+function tileBounce(px,py){
+  ctx.fillStyle='#2f7d4f'; ctx.fillRect(px+2,py+TILE-10,TILE-4,10);      // bas
+  ctx.fillStyle='#3fae6a';
+  const t=Date.now()*0.008;
+  const squish=Math.sin(t)*2;
+  roundRect(px+4,py+TILE-24-squish,TILE-8,18+squish,7); ctx.fill();      // dyna
+  ctx.strokeStyle='#8affb0'; ctx.lineWidth=2; ctx.stroke();
+  ctx.fillStyle='#8affb0'; ctx.fillRect(px+8,py+TILE-20,TILE-16,3);
+}
+function tileLadder(px,py){
+  ctx.fillStyle='#a9762f';
+  ctx.fillRect(px+6,py,4,TILE);            // vänster stolpe
+  ctx.fillRect(px+TILE-10,py,4,TILE);      // höger stolpe
+  ctx.fillStyle='#c98f45';
+  for(let i=6;i<TILE;i+=12){ ctx.fillRect(px+6,py+i,TILE-12,4); }  // steg
+}
+function tileSlide(px,py,dir){
+  ctx.fillStyle='#5aa0d1';
+  ctx.beginPath();
+  if(dir>0){ // lutar nedåt höger
+    ctx.moveTo(px,py); ctx.lineTo(px+TILE,py+TILE); ctx.lineTo(px,py+TILE);
+  } else {   // lutar nedåt vänster
+    ctx.moveTo(px+TILE,py); ctx.lineTo(px,py+TILE); ctx.lineTo(px+TILE,py+TILE);
+  }
+  ctx.closePath(); ctx.fill();
+  // blank yta
+  ctx.strokeStyle='#bfe4ff'; ctx.lineWidth=3;
+  ctx.beginPath();
+  if(dir>0){ ctx.moveTo(px,py); ctx.lineTo(px+TILE,py+TILE); }
+  else { ctx.moveTo(px+TILE,py); ctx.lineTo(px,py+TILE); }
+  ctx.stroke();
+}
+function tileEnemyIcon(px,py,t){
+  // markör i byggläget (i spelet ritas den rörliga fienden istället)
+  const type = t==='enemy2'?2 : t==='enemy3'?3 : 1;
+  ctx.globalAlpha=0.55;
+  drawEnemyBody(px+6,py+8,28,26,1,0,type);
+  ctx.globalAlpha=1;
+}
+function tileGround(px,py){
+  ctx.fillStyle='var'; // placeholder guard
+  ctx.fillStyle=getC('--ground'); ctx.fillRect(px,py,TILE,TILE);
+  ctx.fillStyle=getC('--ground-d'); ctx.fillRect(px,py+TILE-8,TILE,8);
+  ctx.fillStyle='#8a5527'; for(let i=0;i<TILE;i+=10){ ctx.fillRect(px+i+2,py+6,2,3); }
+  ctx.strokeStyle='#00000022'; ctx.strokeRect(px+.5,py+.5,TILE-1,TILE-1);
+}
+function tileBrick(px,py){
+  ctx.fillStyle='#c96b4a'; ctx.fillRect(px,py,TILE,TILE);
+  ctx.strokeStyle='#00000033'; ctx.lineWidth=2;
+  ctx.strokeRect(px+2,py+2,TILE-4,TILE/2-3);
+  ctx.strokeRect(px+2,py+TILE/2+1,TILE-4,TILE/2-3);
+  ctx.fillStyle='#e8917080'; ctx.fillRect(px+3,py+3,TILE-6,4);
+}
+function tileSpike(px,py){
+  ctx.fillStyle='#b8c0d0';
+  for(let i=0;i<3;i++){
+    const sx=px+i*(TILE/3);
+    ctx.beginPath();
+    ctx.moveTo(sx,py+TILE); ctx.lineTo(sx+TILE/6,py+8); ctx.lineTo(sx+TILE/3,py+TILE);
+    ctx.closePath(); ctx.fill();
+  }
+  ctx.fillStyle='#7a8296'; ctx.fillRect(px,py+TILE-4,TILE,4);
+}
+function tileCoin(px,py){
+  const t=Date.now()*0.006;
+  const w=Math.abs(Math.cos(t))*10+6;
+  ctx.fillStyle=getC('--hero'); 
+  ctx.beginPath(); ctx.ellipse(px+TILE/2,py+TILE/2,w,13,0,0,7); ctx.fill();
+  ctx.fillStyle=getC('--hero-d');
+  ctx.beginPath(); ctx.ellipse(px+TILE/2,py+TILE/2,w*0.5,7,0,0,7); ctx.fill();
+}
+
+function drawFlag(cell, kind){
+  const px=cell.x*TILE-cam.x, py=cell.y*TILE-cam.y;
+  if(kind==='start'){
+    ctx.fillStyle='#5ad18a'; 
+  }else{
+    ctx.fillStyle='#ff5d5d';
+  }
+  ctx.fillStyle='#c9c9c9'; ctx.fillRect(px+8,py-TILE+6,4,TILE*2-6); // stång
+  ctx.beginPath();
+  ctx.moveTo(px+12,py-TILE+8);
+  ctx.lineTo(px+34,py-TILE+16);
+  ctx.lineTo(px+12,py-TILE+24);
+  ctx.closePath();
+  if(kind==='start'){ ctx.fillStyle=getC('--good'); }
+  else{
+    // rutig målflagga
+    const g=ctx.createLinearGradient(px,0,px+22,0);
+    ctx.fillStyle='#fff'; ctx.fill();
+    ctx.fillStyle='#000';
+    for(let r=0;r<3;r++)for(let c=0;c<3;c++){ if((r+c)%2===0){ ctx.fillRect(px+12+c*7, py-TILE+8+r*5, 7,5); } }
+    return;
+  }
+  ctx.fill();
+}
+
+function drawPlayer(){
+  const px=player.x-cam.x, py=player.y-cam.y, w=player.w, h=player.h;
+  // blinka under osårbarhet
+  if(mode==='play' && invuln>0 && Math.floor(invuln/4)%2===0) return;
+  drawHeroSprite(ctx, px+w/2, py+h/2, w, h, player.face, player.animT, player.onGround, player.dead, chosenChar);
+}
+// Ritar gubben centrerat i (cx,cy). Används både i spelet och i karaktärsvalet.
+function drawHeroSprite(g, cx, cy, w, h, face, animT, onGround, dead, charKey){
+  const C = CHARS[charKey]||CHARS.jumper;
+  g.save();
+  g.translate(cx, cy);
+  g.scale(face,1);
+  const bob = onGround ? Math.sin(animT)*1.5 : 0;
+  // skugga
+  g.fillStyle='#00000033';
+  g.beginPath(); g.ellipse(0,h/2+2,w*0.5,4,0,0,7); g.fill();
+  // kropp (karaktärsfärg)
+  g.fillStyle=dead?'#888':C.color;
+  roundRect2(g,-w/2, -h/2+bob+8, w, h-8, 6); g.fill();
+  // bröstmarkering (mörkare)
+  g.fillStyle=dead?'#777':C.capeColor;
+  roundRect2(g,-w/2+3,-h/2+bob+10,w-6,6,3); g.fill();
+  // huvud
+  g.fillStyle='#ffd9b3';
+  roundRect2(g,-w/2+2, -h/2+bob, w-4, 16, 6); g.fill();
+  // mössa
+  g.fillStyle=getC('--hero');
+  roundRect2(g,-w/2+1, -h/2+bob-2, w-2, 8, 3); g.fill();
+  // ögon
+  g.fillStyle='#222';
+  if(dead){ g.fillRect(3,-h/2+bob+5,3,3); g.fillRect(9,-h/2+bob+5,3,3); }
+  else { g.fillRect(5,-h/2+bob+5,4,4); }
+  // ben
+  g.fillStyle='#3a4a6a';
+  const legs=Math.sin(animT*2)*3;
+  g.fillRect(-8, h/2-6, 6, 8+ (onGround?legs:0));
+  g.fillRect(2, h/2-6, 6, 8- (onGround?legs:0));
+  g.restore();
+}
+function roundRect2(g,x,y,w,h,r){
+  g.beginPath();
+  g.moveTo(x+r,y);
+  g.arcTo(x+w,y,x+w,y+h,r); g.arcTo(x+w,y+h,x,y+h,r);
+  g.arcTo(x,y+h,x,y,r); g.arcTo(x,y,x+w,y,r);
+  g.closePath();
+}
+
+function drawEnemyBody(px,py,w,h,face,animT,type){
+  type=type||1;
+  ctx.save();
+  ctx.translate(px+w/2, py+h/2);
+  // skugga (ej för flygare)
+  if(type!==3){ ctx.fillStyle='#00000033'; ctx.beginPath(); ctx.ellipse(0,h/2+1,w*0.45,3,0,0,7); ctx.fill(); }
+
+  if(type===1){
+    // Krypare — lila slem med taggar
+    ctx.fillStyle='#8a4fd6'; roundRect(-w/2,-h/2+4,w,h-4,8); ctx.fill();
+    ctx.fillStyle='#a86ff0'; roundRect(-w/2+3,-h/2+6,w-6,8,5); ctx.fill();
+    ctx.fillStyle='#6b3caf';
+    for(let i=-1;i<2;i++){ ctx.beginPath(); ctx.moveTo(i*8-3,-h/2+5); ctx.lineTo(i*8,-h/2-2); ctx.lineTo(i*8+3,-h/2+5); ctx.closePath(); ctx.fill(); }
+    const look=face*4;
+    ctx.fillStyle='#fff'; ctx.beginPath(); ctx.arc(-5,-2,5,0,7); ctx.arc(6,-2,5,0,7); ctx.fill();
+    ctx.fillStyle='#200'; ctx.beginPath(); ctx.arc(-5+look*0.4,-1,2.4,0,7); ctx.arc(6+look*0.4,-1,2.4,0,7); ctx.fill();
+    ctx.fillStyle='#5a2f96';
+    const wob=Math.sin(animT*8)*2;
+    ctx.fillRect(-w/2+3,h/2-4,7,4+wob); ctx.fillRect(w/2-10,h/2-4,7,4-wob);
+
+  } else if(type===2){
+    // Hoppare — grön groda
+    ctx.fillStyle='#3fae5a'; roundRect(-w/2,-h/2+2,w,h-2,10); ctx.fill();
+    ctx.fillStyle='#5fd07a'; roundRect(-w/2+4,-h/2+5,w-8,7,4); ctx.fill();
+    // stora ögon uppe
+    ctx.fillStyle='#2c7d40';
+    ctx.beginPath(); ctx.arc(-6,-h/2+2,5,0,7); ctx.arc(6,-h/2+2,5,0,7); ctx.fill();
+    ctx.fillStyle='#fff';
+    ctx.beginPath(); ctx.arc(-6,-h/2+2,3.5,0,7); ctx.arc(6,-h/2+2,3.5,0,7); ctx.fill();
+    ctx.fillStyle='#111';
+    ctx.beginPath(); ctx.arc(-6,-h/2+2,1.6,0,7); ctx.arc(6,-h/2+2,1.6,0,7); ctx.fill();
+    // mun
+    ctx.strokeStyle='#1c5c2c'; ctx.lineWidth=2; ctx.beginPath(); ctx.arc(0,2,5,0.1,3.04); ctx.stroke();
+    // ben
+    ctx.fillStyle='#2c7d40'; ctx.fillRect(-w/2+2,h/2-5,6,5); ctx.fillRect(w/2-8,h/2-5,6,5);
+
+  } else {
+    // Flygare — fladdermus/spöke som svävar
+    const flap=Math.sin(animT*10)*6;
+    ctx.fillStyle='#6a4a8a';
+    // vingar
+    ctx.beginPath(); ctx.moveTo(-w/2+4,0); ctx.quadraticCurveTo(-w/2-8,-6-flap,-w/2-6,6); ctx.quadraticCurveTo(-w/2,4,-w/2+4,0); ctx.fill();
+    ctx.beginPath(); ctx.moveTo(w/2-4,0); ctx.quadraticCurveTo(w/2+8,-6-flap,w/2+6,6); ctx.quadraticCurveTo(w/2,4,w/2-4,0); ctx.fill();
+    // kropp
+    ctx.fillStyle='#4a3a6a'; roundRect(-w/2+4,-h/2+3,w-8,h-4,8); ctx.fill();
+    // ögon (arga, röda)
+    ctx.fillStyle='#ff5d5d';
+    ctx.beginPath(); ctx.arc(-4,-2,3,0,7); ctx.arc(5,-2,3,0,7); ctx.fill();
+    ctx.fillStyle='#fff';
+    ctx.beginPath(); ctx.arc(-4,-2,1.2,0,7); ctx.arc(5,-2,1.2,0,7); ctx.fill();
+    // små tänder
+    ctx.fillStyle='#fff';
+    ctx.beginPath(); ctx.moveTo(-3,5); ctx.lineTo(-1,9); ctx.lineTo(1,5); ctx.closePath(); ctx.fill();
+  }
+  ctx.restore();
+}
+function drawEnemies(){
+  for(const e of enemies){
+    if(e.dead) continue;
+    drawEnemyBody(e.x-cam.x, e.y-cam.y, e.w, e.h, e.dir, e.anim, e.type);
+  }
+}
+
+function roundRect(x,y,w,h,r){
+  ctx.beginPath();
+  ctx.moveTo(x+r,y);
+  ctx.arcTo(x+w,y,x+w,y+h,r);
+  ctx.arcTo(x+w,y+h,x,y+h,r);
+  ctx.arcTo(x,y+h,x,y,r);
+  ctx.arcTo(x,y,x+w,y,r);
+  ctx.closePath();
+}
+
+// cache CSS-variabler
+const cssCache={};
+function getC(name){
+  if(!cssCache[name]) cssCache[name]=getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  return cssCache[name];
+}
+
+function drawHUD(){
+  if(mode==='play'){
+    const dynLives = Math.max(lives, MAX_LIVES); // hjärtplatser
+    // myntpanel (bank + nuvarande bana)
+    ctx.fillStyle='#000a'; roundRect(10,10,104,32,8); ctx.fill();
+    ctx.fillStyle=getC('--hero'); ctx.font='bold 17px Trebuchet MS';
+    ctx.textBaseline='middle'; ctx.textAlign='left';
+    ctx.fillText('🟡 '+(coinsBank+coinsGot), 20, 27);
+    // hjärtan
+    const hx=124, hy=26;
+    const slots=Math.max(MAX_LIVES,lives);
+    for(let i=0;i<slots;i++){ drawHeart(hx+i*26, hy, 9, i<lives); }
+    // banräknare (om fler än en bana)
+    if(levels.length>1){
+      const label='Bana '+(playLevel+1)+'/'+levels.length;
+      ctx.font='bold 14px Trebuchet MS';
+      const wpx=ctx.measureText(label).width+20;
+      ctx.fillStyle='#000a'; roundRect(vw-wpx-10,10,wpx,28,8); ctx.fill();
+      ctx.fillStyle='#fff'; ctx.textAlign='center';
+      ctx.fillText(label, vw-wpx/2-10, 25);
+      ctx.textAlign='left';
+    }
+  }
+}
+function drawHeart(cx,cy,s,filled){
+  ctx.save();
+  ctx.translate(cx,cy);
+  ctx.beginPath();
+  ctx.moveTo(0,s*0.3);
+  ctx.bezierCurveTo(-s,-s*0.6,-s*1.1,s*0.35,0,s);
+  ctx.bezierCurveTo(s*1.1,s*0.35,s,-s*0.6,0,s*0.3);
+  ctx.closePath();
+  if(filled){ ctx.fillStyle=getC('--accent'); ctx.fill(); ctx.strokeStyle='#ff9a9a'; ctx.lineWidth=1.5; ctx.stroke(); }
+  else { ctx.fillStyle='#00000055'; ctx.fill(); ctx.strokeStyle='#ffffff33'; ctx.lineWidth=1.5; ctx.stroke(); }
+  ctx.restore();
+}
+
+// ---------- Huvudloop ----------
+function frame(){
+  // Bakgrund via canvas-fill
+  ctx.clearRect(0,0,vw,vh);
+  // himmelgradient
+  const g=ctx.createLinearGradient(0,0,0,vh);
+  g.addColorStop(0,getC('--sky1')); g.addColorStop(1,getC('--sky2'));
+  ctx.fillStyle=g; ctx.fillRect(0,0,vw,vh);
+
+  drawBackground();
+  if(mode==='build') drawGrid();
+  drawTiles();
+  drawFlag(startCell,'start');
+  drawFlag(goalCell,'goal');
+
+  if(mode==='play'){ stepPlayer(); drawEnemies(); drawPlayer(); }
+  else {
+    // visa spelaren i vila på startpunkten
+    player.x=startCell.x*TILE+(TILE-player.w)/2;
+    player.y=startCell.y*TILE+(TILE-player.h);
+    drawPlayer();
+  }
+  drawHUD();
+  requestAnimationFrame(frame);
+}
+
+// ---------- Init ----------
+function buildExampleLevels(){
+  // ---- Bana 1: intro till alla delar ----
+  const L1 = newLevelObj(44);
+  const m1 = L1.map;
+  const put=(m,x,y,t)=>{ if(m[y]&&x<m[y].length) m[y][x]=t; };
+  // plattformar
+  [[8,9],[9,9],[12,8],[13,8]].forEach(([x,y])=>put(m1,x,y,'brick'));
+  // studsmatta upp till hög plattform
+  put(m1,16,9,'bounce');
+  [[16,6],[17,6],[18,6]].forEach(([x,y])=>put(m1,x,y,'brick'));
+  // mynt i luften
+  put(m1,17,5,'coin'); put(m1,16,7,'coin'); put(m1,9,8,'coin');
+  // stege upp till en avsats med mynt
+  [[20,7],[20,8],[20,9]].forEach(([x,y])=>put(m1,x,y,'ladder'));
+  [[19,6],[20,6],[21,6],[22,6],[23,6]].forEach(([x,y])=>put(m1,x,y,'brick'));
+  put(m1,22,5,'coin');
+  // krypare som patrullerar
+  put(m1,26,9,'enemy1');
+  // rutschkana (3 rutor bred sluttning) ner mot taggar man hoppar över
+  [[29,7],[30,8],[31,9]].forEach(([x,y])=>put(m1,x,y,'slideR'));
+  put(m1,33,9,'spike'); put(m1,34,9,'spike');
+  // kista på plattformen
+  put(m1,12,7,'chest');
+  put(m1,17,4,'chest');
+  // rullband mot målet
+  [[39,10],[40,10],[41,10]].forEach(([x,y])=>put(m1,x,y,'beltR'));
+  L1.start={x:2,y:9}; L1.goal={x:43,y:9};
+
+  // ---- Bana 2: svårare, med hoppare & flygare ----
+  const L2 = newLevelObj(40);
+  const m2 = L2.map;
+  // hål i golvet (grop)
+  for(let x=10;x<=13;x++){ m2[rows-1][x]=null; m2[rows-2][x]=null; }
+  // hoppare vaktar en avsats
+  [[6,9],[7,9]].forEach(([x,y])=>put(m2,x,y,'brick'));
+  put(m2,7,8,'enemy2');
+  // plattformar över gropen
+  put(m2,11,7,'brick'); put(m2,12,7,'brick');
+  put(m2,11,6,'coin'); put(m2,12,6,'coin');
+  // flygare som svävar
+  put(m2,16,6,'enemy3');
+  put(m2,20,7,'enemy3');
+  // stegar och avsats
+  [[24,7],[24,8],[24,9]].forEach(([x,y])=>put(m2,x,y,'ladder'));
+  [[24,6],[25,6],[26,6],[27,6]].forEach(([x,y])=>put(m2,x,y,'brick'));
+  put(m2,26,5,'chest');
+  // taggfält med studsmatta för att ta sig över
+  put(m2,30,9,'bounce');
+  put(m2,32,9,'spike'); put(m2,33,9,'spike'); put(m2,34,9,'spike');
+  L2.start={x:2,y:9}; L2.goal={x:38,y:9};
+
+  levels=[L1,L2];
+}
+
+function init(){
+  resize();
+  buildExampleLevels();
+  loadLevel(0);
+  updateLevelLabel();
+  toast('Dator: rita med musen · högerklick panorerar · 🦸 väljer gubbe · 💾 sparar');
+  requestAnimationFrame(frame);
+}
+window.addEventListener('load', init);
+resize();
+
+})();
+</script>
+</body>
+</html>

@@ -75,6 +75,13 @@ function HomeScreen({onSelect,scores}){
             {scores[g.id]!==undefined&&<span style={{fontSize:10,color:theme.muted}}>⭐ {scores[g.id]}p</span>}
           </button>
         ))}
+        <button key="klossbygget" onClick={()=>onSelect("klossbygget")} style={{
+          background:theme.purple+"22",border:`2px solid ${theme.purple}`,borderRadius:16,padding:"14px 8px",
+          cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",gap:6,color:theme.text,
+        }}>
+          <span style={{fontSize:28}}>🧱</span>
+          <span style={{fontFamily:theme.font,fontSize:12,color:theme.purple,textAlign:"center"}}>Klossbygget</span>
+        </button>
       </div>
     </div>
   );
@@ -952,6 +959,21 @@ function HighscoreScreen({highscores,currentPlayer,onBack}){
   );
 }
 
+// ===== KLOSSBYGGET (fristaende spel via iframe) =====
+function KlossbyggetScreen({onBack}){
+  return(
+    <div style={{position:"fixed",inset:0,background:theme.bg,display:"flex",flexDirection:"column",zIndex:50}}>
+      <div style={{flex:"0 0 auto",display:"flex",alignItems:"center",gap:10,padding:"10px 14px",background:theme.card,borderBottom:"2px solid #0d1117"}}>
+        <button onClick={onBack} style={{background:"none",border:`2px solid ${theme.muted}`,borderRadius:10,color:theme.text,padding:"6px 12px",cursor:"pointer",fontSize:14}}>← Tillbaka</button>
+        <span style={{fontFamily:theme.font,fontSize:18}}>🧱 Klossbygget</span>
+      </div>
+      <iframe src="./klossbygget.html" title="Klossbygget"
+        style={{flex:"1 1 auto",width:"100%",border:"none",background:"#12192b"}}
+        allow="autoplay"></iframe>
+    </div>
+  );
+}
+
 // ===== MAIN APP =====
 function App(){
   const [screen,setScreen]=useState("setup");
@@ -1006,12 +1028,13 @@ function App(){
       )}
       {screen==="highscore"&&<HighscoreScreen highscores={highscores} currentPlayer={player} onBack={()=>setScreen("home")}/>}
       {screen==="walkie"&&<WalkieTalkieScreen playerName={player} onBack={()=>setScreen("home")}/>}
+      {screen==="klossbygget"&&<KlossbyggetScreen onBack={()=>setScreen("home")}/>}
       {gameInfo&&gameMap[screen]&&(
         <GameWrapper title={gameInfo.label} emoji={gameInfo.emoji} color={gameInfo.color} onBack={()=>setScreen("home")}>
           {gameMap[screen]}
         </GameWrapper>
       )}
-      {screen!=="setup"&&(
+      {screen!=="setup"&&screen!=="klossbygget"&&(
         <div style={{position:"fixed",bottom:0,left:0,right:0,background:"#0d1117ee",borderTop:"1px solid #333",padding:"8px 16px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
           <span style={{color:theme.muted,fontSize:13}}>👤 {player}</span>
           <span style={{fontFamily:theme.font,color:theme.gold,fontSize:14}}>{sessionTotal} ⭐ denna omgång</span>
