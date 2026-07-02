@@ -762,13 +762,26 @@ function WalkieTalkieScreen({playerName, onBack}) {
     e.preventDefault();
     if (status !== "ready") return;
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: { sampleRate: 16000, channelCount: 1, echoCancellation: true } });
       audioChunks.current = [];
-      const mr = new MediaRecorder(stream);
+      // Try low bitrate options
+      const opts = [
+        { mimeType: "audio/webm;codecs=opus", audioBitsPerSecond: 8000 },
+        { mimeType: "audio/webm", audioBitsPerSecond: 8000 },
+        { audioBitsPerSecond: 8000 },
+        {},
+      ];
+      let mr;
+      for (const o of opts) {
+        try { mr = new MediaRecorder(stream, o); break; } catch(e) {}
+      }
+      if (!mr) mr = new MediaRecorder(stream);
       mediaRecorder.current = mr;
       mr.ondataavailable = (e) => { if (e.data.size > 0) audioChunks.current.push(e.data); };
       mr.start();
       setStatus("recording");
+      // Auto-stop after 8 seconds max
+      setTimeout(() => { if (mediaRecorder.current && mediaRecorder.current.state === "recording") stopRecording({preventDefault:()=>{}}); }, 8000);
     } catch(e) {
       setError("Mikrofonåtkomst nekad. Tillåt mikrofon i webbläsaren!");
     }
@@ -780,8 +793,12 @@ function WalkieTalkieScreen({playerName, onBack}) {
     mediaRecorder.current.stop();
     mediaRecorder.current.stream.getTracks().forEach(t => t.stop());
     mediaRecorder.current.onstop = async () => {
-      const blob = new Blob(audioChunks.current, { type: "audio/webm" });
-      // Convert to base64
+      const blob = new Blob(audioChunks.current, { type: audioChunks.current[0]?.type || "audio/webm" });
+      if (blob.size > 60000) {
+        setError("Meddelandet var för långt! Max ~8 sekunder.");
+        setStatus("ready");
+        return;
+      }
       const reader = new FileReader();
       reader.onloadend = async () => {
         const b64 = reader.result.split(",")[1];
@@ -791,7 +808,7 @@ function WalkieTalkieScreen({playerName, onBack}) {
             audioB64: b64,
             timestamp: Date.now(),
           });
-        } catch(e) { setError("Kunde inte skicka: " + e.message); }
+        } catch(err) { setError("Kunde inte skicka: " + err.message); }
       };
       reader.readAsDataURL(blob);
       setStatus("ready");
