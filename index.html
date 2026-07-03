@@ -710,6 +710,8 @@ function WalkieTalkieScreen({playerName, onBack}) {
   const mediaRecorder = useRef(null);
   const audioChunks = useRef([]);
   const presenceRef = useRef(null);
+  const isRecordingRef = useRef(false);
+  const recordingStarted = useRef(false);
 
   useEffect(() => {
     let client;
@@ -726,12 +728,13 @@ function WalkieTalkieScreen({playerName, onBack}) {
         ablyCh.current = ch;
         // Subscribe to voice messages
         await ch.subscribe("voice", (msg) => {
-          const { from, audioB64, timestamp } = msg.data;
+          const { from, audioB64: _ab, timestamp, mime: _mime } = msg.data;
           if (from === playerName) return;
+          const { audioB64, from: msgFrom, mime: msgMime } = msg.data;
           const binary = atob(audioB64);
           const bytes = new Uint8Array(binary.length);
           for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-          const blob = new Blob([bytes], { type: "audio/webm" });
+          const blob = new Blob([bytes], { type: msgMime || "audio/mp4" });
           const url = URL.createObjectURL(blob);
           setMessages(m => [...m.slice(-19), { from, url, timestamp, id: Date.now() }]);
           // Auto-play incoming
@@ -759,43 +762,64 @@ function WalkieTalkieScreen({playerName, onBack}) {
   }, []);
 
   async function startRecording(e) {
-    e.preventDefault();
-    if (status !== "ready") return;
+    if(e && e.preventDefault) e.preventDefault();
+    if(e && e.stopPropagation) e.stopPropagation();
+    if(isRecordingRef.current) return;
+    if(status !== "ready") return;
+    isRecordingRef.current = true;
+    recordingStarted.current = false;
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: { sampleRate: 16000, channelCount: 1, echoCancellation: true } });
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true } });
       audioChunks.current = [];
-      // Try low bitrate options
+      // iOS supports audio/mp4, Android prefers audio/webm
       const opts = [
-        { mimeType: "audio/webm;codecs=opus", audioBitsPerSecond: 8000 },
-        { mimeType: "audio/webm", audioBitsPerSecond: 8000 },
-        { audioBitsPerSecond: 8000 },
+        { mimeType: "audio/mp4", audioBitsPerSecond: 16000 },
+        { mimeType: "audio/webm;codecs=opus", audioBitsPerSecond: 16000 },
+        { mimeType: "audio/webm", audioBitsPerSecond: 16000 },
         {},
       ];
       let mr;
       for (const o of opts) {
-        try { mr = new MediaRecorder(stream, o); break; } catch(e) {}
+        try { if(MediaRecorder.isTypeSupported(o.mimeType||"")) { mr = new MediaRecorder(stream, o); break; } } catch(ex) {}
       }
       if (!mr) mr = new MediaRecorder(stream);
       mediaRecorder.current = mr;
-      mr.ondataavailable = (e) => { if (e.data.size > 0) audioChunks.current.push(e.data); };
-      mr.start();
+      mr.ondataavailable = (ev) => { if(ev.data && ev.data.size > 0) audioChunks.current.push(ev.data); };
+      mr.start(100); // collect chunks every 100ms
+      recordingStarted.current = true;
       setStatus("recording");
-      // Auto-stop after 8 seconds max
-      setTimeout(() => { if (mediaRecorder.current && mediaRecorder.current.state === "recording") stopRecording({preventDefault:()=>{}}); }, 8000);
-    } catch(e) {
-      setError("Mikrofonåtkomst nekad. Tillåt mikrofon i webbläsaren!");
+      // Auto-stop after 10s
+      setTimeout(() => { if(isRecordingRef.current) doStop(); }, 10000);
+    } catch(ex) {
+      isRecordingRef.current = false;
+      setError("Mikrofonåtkomst nekad: " + ex.message);
     }
   }
 
-  async function stopRecording(e) {
-    e.preventDefault();
-    if (status !== "recording" || !mediaRecorder.current) return;
-    mediaRecorder.current.stop();
-    mediaRecorder.current.stream.getTracks().forEach(t => t.stop());
-    mediaRecorder.current.onstop = async () => {
-      const blob = new Blob(audioChunks.current, { type: audioChunks.current[0]?.type || "audio/webm" });
-      if (blob.size > 60000) {
-        setError("Meddelandet var för långt! Max ~8 sekunder.");
+  function doStop() {
+    if(!isRecordingRef.current) return;
+    isRecordingRef.current = false;
+    const mr = mediaRecorder.current;
+    if(!mr) return;
+    if(mr.state === "recording" || mr.state === "paused") {
+      mr.stop();
+    }
+    mr.stream.getTracks().forEach(t => t.stop());
+    mr.onstop = async () => {
+      if(audioChunks.current.length === 0) {
+        setError("Inget ljud spelades in — försök igen!");
+        setStatus("ready");
+        return;
+      }
+      const mime = audioChunks.current[0]?.type || "audio/mp4";
+      const blob = new Blob(audioChunks.current, { type: mime });
+      if(blob.size < 100) {
+        setError("För kort inspelning, försök igen!");
+        setStatus("ready");
+        return;
+      }
+      if(blob.size > 60000) {
+        setError("För långt meddelande! Max ~10 sek.");
         setStatus("ready");
         return;
       }
@@ -803,16 +827,19 @@ function WalkieTalkieScreen({playerName, onBack}) {
       reader.onloadend = async () => {
         const b64 = reader.result.split(",")[1];
         try {
-          await ablyCh.current.publish("voice", {
-            from: playerName,
-            audioB64: b64,
-            timestamp: Date.now(),
-          });
+          await ablyCh.current.publish("voice", { from: playerName, audioB64: b64, mime, timestamp: Date.now() });
         } catch(err) { setError("Kunde inte skicka: " + err.message); }
       };
       reader.readAsDataURL(blob);
       setStatus("ready");
     };
+  }
+
+  function stopRecording(e) {
+    if(e && e.preventDefault) e.preventDefault();
+    if(e && e.stopPropagation) e.stopPropagation();
+    // Small delay to let at least one chunk be recorded
+    setTimeout(doStop, 300);
   }
 
   const isRecording = status === "recording";
@@ -848,10 +875,9 @@ function WalkieTalkieScreen({playerName, onBack}) {
 
       {/* PTT Button */}
       <div style={{textAlign:"center",marginBottom:20}}>
-        <div
-          onTouchStart={(e)=>{e.preventDefault();e.stopPropagation();startRecording(e);}}
-          onTouchEnd={(e)=>{e.preventDefault();e.stopPropagation();stopRecording(e);}}
-          onTouchCancel={(e)=>{e.preventDefault();stopRecording(e);}}
+        <button
+          onTouchStart={startRecording} onTouchEnd={stopRecording}
+          onTouchCancel={stopRecording}
           onMouseDown={startRecording} onMouseUp={stopRecording}
           style={{
             width:140,height:140,borderRadius:"50%",
@@ -862,18 +888,15 @@ function WalkieTalkieScreen({playerName, onBack}) {
             transition:"all 0.15s",
             display:"flex",alignItems:"center",justifyContent:"center",
             margin:"0 auto",
-            userSelect:"none",WebkitUserSelect:"none",
-            WebkitTouchCallout:"none",
-            touchAction:"none",
           }}
         >
           {isRecording?"🔴":"🎙️"}
-        </div>
+        </button>
         <div style={{fontFamily:"'Fredoka One',cursive",fontSize:16,color:isRecording?"#e94560":isReady?"#27ae60":"#8892b0",marginTop:12}}>
-          {isRecording?"🔴 SÄNDER...":isReady?"Tryck och håll för att tala":status==="connecting"?"Ansluter...":"Frånkopplad"}
+          {isRecording?"SÄNDER...":isReady?"Håll in för att tala":status==="connecting"?"Ansluter...":"Frånkopplad"}
         </div>
         <div style={{color:"#8892b0",fontSize:12,marginTop:4}}>
-          {isReady?"Håll inne — släpp för att skicka":""}
+          {isReady?"Tryck och håll — släpp för att skicka":""}
         </div>
       </div>
 
