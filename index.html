@@ -705,22 +705,13 @@ function WalkieTalkieScreen({playerName, onBack}) {
   const [messages, setMessages] = useState([]);
   const [error, setError] = useState("");
   const [onlineUsers, setOnlineUsers] = useState([]);
-  const [target, setTarget] = useState("alla"); // "alla" or specific name
+  const [target, setTarget] = useState("alla");
   const [recSeconds, setRecSeconds] = useState(0);
   const ablyCh = useRef(null);
   const ablyClient = useRef(null);
   const mediaRecorder = useRef(null);
   const audioChunks = useRef([]);
-  const recording = useRef(false);
   const timerRef = useRef(null);
-  const streamRef = useRef(null);
-
-  // Ask for mic permission immediately on mount
-  useEffect(() => {
-    navigator.mediaDevices.getUserMedia({ audio: true })
-      .then(s => { streamRef.current = s; })
-      .catch(() => {});
-  }, []);
 
   useEffect(() => {
     async function connect() {
@@ -730,15 +721,13 @@ function WalkieTalkieScreen({playerName, onBack}) {
         ablyClient.current = client;
         await new Promise((res, rej) => {
           client.connection.on("connected", res);
-          client.connection.on("failed", (err) => rej(err));
+          client.connection.on("failed", rej);
         });
         const ch = client.channels.get(CHANNEL_NAME);
         ablyCh.current = ch;
-
         await ch.subscribe("voice", (msg) => {
           const { from, audioB64, mime, to } = msg.data;
           if (from === playerName) return;
-          // Only play if addressed to me or to "alla"
           if (to !== "alla" && to !== playerName) return;
           try {
             const binary = atob(audioB64);
@@ -746,17 +735,18 @@ function WalkieTalkieScreen({playerName, onBack}) {
             for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
             const blob = new Blob([bytes], { type: mime || "audio/mp4" });
             const url = URL.createObjectURL(blob);
-            const label = to === "alla" ? `→ Alla` : `→ dig`;
+            const label = to === "alla" ? "→ Alla" : "→ dig";
             setMessages(m => [...m.slice(-19), { from, url, id: Date.now(), label }]);
             new Audio(url).play().catch(() => {});
           } catch(ex) { console.error(ex); }
         });
-
         await ch.presence.enter({ name: playerName });
         const present = await ch.presence.get();
         setOnlineUsers(present.map(p => p.clientId).filter(u => u !== playerName));
         ch.presence.subscribe(() => {
-          ch.presence.get().then(p => setOnlineUsers(p.map(x => x.clientId).filter(u => u !== playerName)));
+          ch.presence.get().then(p => setOnlineUsers(
+            p.map(x => x.clientId).filter(u => u !== playerName)
+          ));
         });
         setStatus("ready");
       } catch(e) {
@@ -767,188 +757,159 @@ function WalkieTalkieScreen({playerName, onBack}) {
     connect();
     return () => {
       clearInterval(timerRef.current);
-      try { ablyCh.current && ablyCh.current.presence.leave(); } catch(e){}
-      try { ablyClient.current && ablyClient.current.close(); } catch(e){}
-      if (streamRef.current) streamRef.current.getTracks().forEach(t => t.stop());
+      try { if (mediaRecorder.current && mediaRecorder.current.state !== "inactive") mediaRecorder.current.stop(); } catch(e) {}
+      try { ablyCh.current && ablyCh.current.presence.leave(); } catch(e) {}
+      try { ablyClient.current && ablyClient.current.close(); } catch(e) {}
     };
   }, []);
 
-  function startRecording(e) {
-    if(e) { e.preventDefault(); e.stopPropagation(); }
-    if(recording.current || status !== "ready") return;
-    recording.current = true;
-    setError("");
-    setRecSeconds(0);
-
-    // Get a fresh stream (reuse if available)
-    const doRecord = (stream) => {
-      streamRef.current = stream;
-      audioChunks.current = [];
-      let mime = "";
-      const candidates = ["audio/mp4", "audio/webm;codecs=opus", "audio/webm"];
-      for (const c of candidates) {
-        try { if(MediaRecorder.isTypeSupported(c)) { mime = c; break; } } catch(ex) {}
-      }
-      let mr;
-      try {
-        mr = mime
-          ? new MediaRecorder(stream, { mimeType: mime, audioBitsPerSecond: 24000 })
-          : new MediaRecorder(stream);
-      } catch(ex) {
-        mr = new MediaRecorder(stream);
-      }
-      mediaRecorder.current = mr;
-      mr.ondataavailable = (ev) => { if(ev.data && ev.data.size > 0) audioChunks.current.push(ev.data); };
-      mr.start(500);
-      setStatus("recording");
-
-      // Timer
-      let secs = 0;
-      timerRef.current = setInterval(() => { secs++; setRecSeconds(secs); if(secs >= 20) stopRecording(); }, 1000);
-    };
-
-    navigator.mediaDevices.getUserMedia({ audio: { channelCount:1, echoCancellation:true, noiseSuppression:true }})
-      .then(doRecord)
-      .catch(ex => { recording.current = false; setError("Mikrofonfel: " + ex.message); });
+  function toggleRecording() {
+    if (status === "recording") {
+      stopRecording();
+    } else if (status === "ready") {
+      startRecording();
+    }
   }
 
-  function stopRecording(e) {
-    if(e) { e.preventDefault(); e.stopPropagation(); }
-    if(!recording.current) return;
-    recording.current = false;
+  async function startRecording() {
+    setError("");
+    setRecSeconds(0);
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true }
+      });
+      audioChunks.current = [];
+
+      // Pick best mime — iOS needs audio/mp4
+      let mime = "";
+      for (const c of ["audio/mp4", "audio/webm;codecs=opus", "audio/webm"]) {
+        try { if (MediaRecorder.isTypeSupported(c)) { mime = c; break; } } catch(ex) {}
+      }
+      // Low bitrate = longer recording within 64KB limit
+      const mr = mime
+        ? new MediaRecorder(stream, { mimeType: mime, audioBitsPerSecond: 6000 })
+        : new MediaRecorder(stream);
+      mediaRecorder.current = mr;
+
+      mr.ondataavailable = (ev) => {
+        if (ev.data && ev.data.size > 0) audioChunks.current.push(ev.data);
+      };
+      mr.start(1000); // chunk every second
+      setStatus("recording");
+
+      let secs = 0;
+      timerRef.current = setInterval(() => {
+        secs++;
+        setRecSeconds(secs);
+        if (secs >= 30) stopRecording(); // auto-stop at 30s
+      }, 1000);
+    } catch(ex) {
+      setError("Mikrofonfel: " + ex.message);
+    }
+  }
+
+  function stopRecording() {
     clearInterval(timerRef.current);
-    setStatus("ready");
-
     const mr = mediaRecorder.current;
-    if(!mr || mr.state === "inactive") { setError("Inget ljud — försök igen!"); return; }
-
+    if (!mr || mr.state === "inactive") { setStatus("ready"); return; }
     mr.onstop = async () => {
+      mr.stream.getTracks().forEach(t => t.stop());
       const chunks = audioChunks.current;
-      if(chunks.length === 0) { setError("Inget ljud! Håll inne längre."); return; }
+      if (chunks.length === 0) { setError("Inget ljud! Försök igen."); setStatus("ready"); return; }
       const useMime = chunks[0].type || "audio/mp4";
       const blob = new Blob(chunks, { type: useMime });
-      if(blob.size < 300) { setError("För kort! Håll inne minst 1 sekund."); return; }
-      if(blob.size > 60000) { setError("För långt! Max ~20 sek."); return; }
+      if (blob.size > 60000) { setError("För långt! Max ~30 sek."); setStatus("ready"); return; }
       const reader = new FileReader();
       reader.onloadend = async () => {
         const b64 = reader.result.split(",")[1];
-        if(!b64) { setError("Läsfel — försök igen."); return; }
+        if (!b64) { setError("Läsfel — försök igen."); setStatus("ready"); return; }
         try {
           await ablyCh.current.publish("voice", {
-            from: playerName,
-            to: target,
-            audioB64: b64,
-            mime: useMime,
+            from: playerName, to: target,
+            audioB64: b64, mime: useMime,
             timestamp: Date.now()
           });
         } catch(err) { setError("Sändfel: " + err.message); }
+        setStatus("ready");
       };
       reader.readAsDataURL(blob);
     };
-
     mr.stop();
-    // Don't stop stream tracks — keep mic warm for next message
+    setStatus("ready");
   }
 
   const isRecording = status === "recording";
   const isReady = status === "ready";
-  const others = onlineUsers;
 
   return (
-    <div style={{maxWidth:480,margin:"0 auto",padding:16,WebkitUserSelect:"none",userSelect:"none",WebkitTouchCallout:"none"}}>
+    <div style={{maxWidth:480,margin:"0 auto",padding:16}}>
       <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:16}}>
-        <button onClick={onBack} style={{background:"none",border:"2px solid #8892b0",borderRadius:10,color:"#8892b0",padding:"6px 12px",cursor:"pointer",WebkitUserSelect:"none"}}>← Hem</button>
+        <button onClick={onBack} style={{background:"none",border:"2px solid #8892b0",borderRadius:10,color:"#8892b0",padding:"6px 12px",cursor:"pointer"}}>← Hem</button>
         <h2 style={{fontFamily:"'Fredoka One',cursive",color:"#f5a623",margin:0,fontSize:22}}>📻 Walkie-Talkie</h2>
       </div>
 
-      {/* Status bar */}
       <div style={{background:"#16213e",borderRadius:16,padding:14,marginBottom:14,textAlign:"center"}}>
         <div style={{fontSize:12,color:"#8892b0",marginBottom:4}}>
           {status==="connecting"?"🔄 Ansluter...":isReady||isRecording?"🟢 Ansluten":"⚫ Frånkopplad"}
         </div>
-        <div style={{fontFamily:"'Fredoka One',cursive",color:"#eaeaea",fontSize:15}}>
-          👤 Du: {playerName}
-        </div>
-        {others.length > 0 && (
+        <div style={{fontFamily:"'Fredoka One',cursive",color:"#eaeaea",fontSize:15}}>👤 {playerName}</div>
+        {onlineUsers.length > 0 && (
           <div style={{marginTop:8,display:"flex",flexWrap:"wrap",gap:6,justifyContent:"center"}}>
-            <span style={{background:"#27ae6033",border:"1px solid #27ae60",borderRadius:20,padding:"2px 10px",fontSize:12,color:"#eaeaea"}}>🚗 Alla ({others.length+1} bilar)</span>
-            {others.map(u => (
+            {onlineUsers.map(u => (
               <span key={u} style={{background:"#3498db33",border:"1px solid #3498db",borderRadius:20,padding:"2px 10px",fontSize:12,color:"#eaeaea"}}>🚗 {u}</span>
             ))}
           </div>
         )}
-        {others.length === 0 && isReady && (
-          <div style={{color:"#8892b0",fontSize:12,marginTop:4}}>Väntar på andra bilar...</div>
-        )}
+        {onlineUsers.length === 0 && isReady && <div style={{color:"#8892b0",fontSize:12,marginTop:4}}>Väntar på andra bilar...</div>}
       </div>
 
-      {/* Target selector */}
-      {others.length > 0 && (
+      {onlineUsers.length > 0 && (
         <div style={{marginBottom:14}}>
           <div style={{fontFamily:"'Fredoka One',cursive",color:"#8892b0",fontSize:13,marginBottom:6}}>Skicka till:</div>
           <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-            <button onClick={()=>setTarget("alla")} style={{
-              padding:"8px 16px",borderRadius:20,border:`2px solid ${target==="alla"?"#f5a623":"#444"}`,
-              background:target==="alla"?"#f5a62333":"#16213e",color:target==="alla"?"#f5a623":"#8892b0",
-              fontFamily:"'Fredoka One',cursive",fontSize:14,cursor:"pointer"
-            }}>📢 Alla bilar</button>
-            {others.map(u => (
-              <button key={u} onClick={()=>setTarget(u)} style={{
-                padding:"8px 16px",borderRadius:20,border:`2px solid ${target===u?"#3498db":"#444"}`,
-                background:target===u?"#3498db33":"#16213e",color:target===u?"#3498db":"#8892b0",
-                fontFamily:"'Fredoka One',cursive",fontSize:14,cursor:"pointer"
-              }}>🚗 {u}</button>
+            <button onClick={()=>setTarget("alla")} style={{padding:"8px 16px",borderRadius:20,border:`2px solid ${target==="alla"?"#f5a623":"#444"}`,background:target==="alla"?"#f5a62333":"#16213e",color:target==="alla"?"#f5a623":"#8892b0",fontFamily:"'Fredoka One',cursive",fontSize:14,cursor:"pointer"}}>📢 Alla</button>
+            {onlineUsers.map(u => (
+              <button key={u} onClick={()=>setTarget(u)} style={{padding:"8px 16px",borderRadius:20,border:`2px solid ${target===u?"#3498db":"#444"}`,background:target===u?"#3498db33":"#16213e",color:target===u?"#3498db":"#8892b0",fontFamily:"'Fredoka One',cursive",fontSize:14,cursor:"pointer"}}>🚗 {u}</button>
             ))}
           </div>
         </div>
       )}
 
-      {error && (
-        <div style={{background:"#e9456022",border:"2px solid #e94560",borderRadius:12,padding:10,color:"#e94560",fontSize:14,marginBottom:14}}>
-          ⚠️ {error}
-        </div>
-      )}
+      {error && <div style={{background:"#e9456022",border:"2px solid #e94560",borderRadius:12,padding:10,color:"#e94560",fontSize:14,marginBottom:14}}>⚠️ {error}</div>}
 
-      {/* Big PTT button */}
-      <div style={{textAlign:"center",marginBottom:20,WebkitTouchCallout:"none"}}>
-        <div
-          onTouchStart={startRecording}
-          onTouchEnd={stopRecording}
-          onTouchCancel={stopRecording}
-          onMouseDown={startRecording}
-          onMouseUp={stopRecording}
+      <div style={{textAlign:"center",marginBottom:20}}>
+        <button
+          onClick={toggleRecording}
+          disabled={!isReady && !isRecording}
           style={{
             width:170,height:170,borderRadius:"50%",
             background:isRecording?"#e94560":isReady?"#27ae60":"#444",
             border:`7px solid ${isRecording?"#ff6b85":isReady?"#2ecc71":"#666"}`,
             fontSize:60,
-            boxShadow:isRecording?"0 0 60px #e9456088,0 0 120px #e9456033":isReady?"0 0 30px #27ae6055":"none",
-            transition:"background 0.1s, box-shadow 0.1s",
+            boxShadow:isRecording?"0 0 60px #e9456088":"none",
+            transition:"background 0.15s",
             display:"flex",alignItems:"center",justifyContent:"center",
-            margin:"0 auto",
-            cursor:isReady?"pointer":"default",
-            WebkitTouchCallout:"none",
-            touchAction:"none",
-            WebkitUserSelect:"none",
-            userSelect:"none",
+            margin:"0 auto",cursor:isReady||isRecording?"pointer":"default",
           }}
         >
-          {isRecording?"🔴":"🎙️"}
-        </div>
-        <div style={{fontFamily:"'Fredoka One',cursive",fontSize:20,marginTop:16,
-          color:isRecording?"#e94560":isReady?"#27ae60":"#8892b0"}}>
+          {isRecording?"⏹️":"🎙️"}
+        </button>
+        <div style={{fontFamily:"'Fredoka One',cursive",fontSize:20,marginTop:16,color:isRecording?"#e94560":isReady?"#27ae60":"#8892b0"}}>
           {isRecording
-            ? `● SÄNDER... ${recSeconds}s`
-            : isReady
-            ? `TRYCK & HÅLL → ${target==="alla"?"ALLA":""+target}`
-            : status==="connecting"?"Ansluter...":"Frånkopplad"}
+            ? `● SÄNDER... ${recSeconds}s — tryck för att skicka`
+            : isReady ? "TRYCK för att börja tala"
+            : status==="connecting" ? "Ansluter..." : "Frånkopplad"}
         </div>
-        <div style={{color:"#8892b0",fontSize:12,marginTop:4}}>
-          {isReady?"Håll inne — släpp för att skicka. Max 20 sek.":""}
-        </div>
+        {isReady && !isRecording && (
+          <div style={{color:"#8892b0",fontSize:13,marginTop:4}}>
+            Skickar till: <strong style={{color:"#f5a623"}}>{target==="alla"?"Alla bilar":target}</strong>
+          </div>
+        )}
+        {isRecording && (
+          <div style={{color:"#8892b0",fontSize:12,marginTop:4}}>Max 30 sekunder</div>
+        )}
       </div>
 
-      {/* Message log */}
       {messages.length > 0 && (
         <div style={{background:"#16213e",borderRadius:16,padding:12}}>
           <div style={{fontFamily:"'Fredoka One',cursive",color:"#8892b0",fontSize:13,marginBottom:8}}>📨 Mottagna:</div>
