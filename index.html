@@ -700,6 +700,33 @@ function BingoGame({onScore}){
 const ABLY_KEY = "noXoUQ.ljS0og:Qm3q8XMKwuSJL1KQ1tw7tiNf-GP7jynZgKmMD9QP0SM";
 const CHANNEL_NAME = "bilresa-walkie";
 
+// Encode PCM samples to WAV blob — works on ALL browsers including iOS Safari
+function encodeWAV(samples, sampleRate) {
+  const buffer = new ArrayBuffer(44 + samples.length * 2);
+  const view = new DataView(buffer);
+  function writeStr(offset, str) { for (let i = 0; i < str.length; i++) view.setUint8(offset + i, str.charCodeAt(i)); }
+  writeStr(0, "RIFF");
+  view.setUint32(4, 36 + samples.length * 2, true);
+  writeStr(8, "WAVE");
+  writeStr(12, "fmt ");
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);       // PCM
+  view.setUint16(22, 1, true);       // mono
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, sampleRate * 2, true);
+  view.setUint16(32, 2, true);
+  view.setUint16(34, 16, true);
+  writeStr(36, "data");
+  view.setUint32(40, samples.length * 2, true);
+  let offset = 44;
+  for (let i = 0; i < samples.length; i++) {
+    const s = Math.max(-1, Math.min(1, samples[i]));
+    view.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
+    offset += 2;
+  }
+  return new Blob([buffer], { type: "audio/wav" });
+}
+
 function WalkieTalkieScreen({playerName, onBack}) {
   const [status, setStatus] = useState("idle");
   const [messages, setMessages] = useState([]);
@@ -709,9 +736,12 @@ function WalkieTalkieScreen({playerName, onBack}) {
   const [recSeconds, setRecSeconds] = useState(0);
   const ablyCh = useRef(null);
   const ablyClient = useRef(null);
-  const mediaRecorder = useRef(null);
-  const audioChunks = useRef([]);
   const timerRef = useRef(null);
+  const audioCtxRef = useRef(null);
+  const processorRef = useRef(null);
+  const streamRef = useRef(null);
+  const samplesRef = useRef([]);
+  const sampleRateRef = useRef(16000);
 
   useEffect(() => {
     async function connect() {
@@ -726,14 +756,14 @@ function WalkieTalkieScreen({playerName, onBack}) {
         const ch = client.channels.get(CHANNEL_NAME);
         ablyCh.current = ch;
         await ch.subscribe("voice", (msg) => {
-          const { from, audioB64, mime, to } = msg.data;
+          const { from, audioB64, to } = msg.data;
           if (from === playerName) return;
           if (to !== "alla" && to !== playerName) return;
           try {
             const binary = atob(audioB64);
             const bytes = new Uint8Array(binary.length);
             for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-            const blob = new Blob([bytes], { type: mime || "audio/mp4" });
+            const blob = new Blob([bytes], { type: "audio/wav" });
             const url = URL.createObjectURL(blob);
             const label = to === "alla" ? "→ Alla" : "→ dig";
             setMessages(m => [...m.slice(-19), { from, url, id: Date.now(), label }]);
@@ -757,85 +787,103 @@ function WalkieTalkieScreen({playerName, onBack}) {
     connect();
     return () => {
       clearInterval(timerRef.current);
-      try { if (mediaRecorder.current && mediaRecorder.current.state !== "inactive") mediaRecorder.current.stop(); } catch(e) {}
+      stopCapture();
       try { ablyCh.current && ablyCh.current.presence.leave(); } catch(e) {}
       try { ablyClient.current && ablyClient.current.close(); } catch(e) {}
     };
   }, []);
 
+  function stopCapture() {
+    try { processorRef.current && processorRef.current.disconnect(); } catch(e) {}
+    try { audioCtxRef.current && audioCtxRef.current.close(); } catch(e) {}
+    try { streamRef.current && streamRef.current.getTracks().forEach(t => t.stop()); } catch(e) {}
+    processorRef.current = null;
+    audioCtxRef.current = null;
+    streamRef.current = null;
+  }
+
   function toggleRecording() {
-    if (status === "recording") {
-      stopRecording();
-    } else if (status === "ready") {
-      startRecording();
-    }
+    if (status === "recording") stopRecording();
+    else if (status === "ready") startRecording();
   }
 
   async function startRecording() {
     setError("");
     setRecSeconds(0);
+    samplesRef.current = [];
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
-        audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true }
+        audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, sampleRate: 16000 }
       });
-      audioChunks.current = [];
+      streamRef.current = stream;
 
-      // Pick best mime — iOS needs audio/mp4
-      let mime = "";
-      for (const c of ["audio/mp4", "audio/webm;codecs=opus", "audio/webm"]) {
-        try { if (MediaRecorder.isTypeSupported(c)) { mime = c; break; } } catch(ex) {}
-      }
-      // Low bitrate = longer recording within 64KB limit
-      const mr = mime
-        ? new MediaRecorder(stream, { mimeType: mime, audioBitsPerSecond: 6000 })
-        : new MediaRecorder(stream);
-      mediaRecorder.current = mr;
+      // Use AudioContext — works on iOS Safari
+      const ctx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
+      audioCtxRef.current = ctx;
+      sampleRateRef.current = ctx.sampleRate;
 
-      mr.ondataavailable = (ev) => {
-        if (ev.data && ev.data.size > 0) audioChunks.current.push(ev.data);
+      const source = ctx.createMediaStreamSource(stream);
+      // ScriptProcessor deprecated but works on iOS; bufferSize 4096
+      const processor = ctx.createScriptProcessor(4096, 1, 1);
+      processorRef.current = processor;
+
+      processor.onaudioprocess = (e) => {
+        const channelData = e.inputBuffer.getChannelData(0);
+        // Downsample to 8000 Hz by keeping every other sample if sampleRate is 16000
+        const ratio = Math.round(ctx.sampleRate / 8000);
+        for (let i = 0; i < channelData.length; i += ratio) {
+          samplesRef.current.push(channelData[i]);
+        }
       };
-      mr.start(1000); // chunk every second
-      setStatus("recording");
 
+      source.connect(processor);
+      processor.connect(ctx.destination);
+
+      setStatus("recording");
       let secs = 0;
       timerRef.current = setInterval(() => {
         secs++;
         setRecSeconds(secs);
-        if (secs >= 30) stopRecording(); // auto-stop at 30s
+        if (secs >= 30) stopRecording();
       }, 1000);
     } catch(ex) {
       setError("Mikrofonfel: " + ex.message);
     }
   }
 
-  function stopRecording() {
+  async function stopRecording() {
     clearInterval(timerRef.current);
-    const mr = mediaRecorder.current;
-    if (!mr || mr.state === "inactive") { setStatus("ready"); return; }
-    mr.onstop = async () => {
-      mr.stream.getTracks().forEach(t => t.stop());
-      const chunks = audioChunks.current;
-      if (chunks.length === 0) { setError("Inget ljud! Försök igen."); setStatus("ready"); return; }
-      const useMime = chunks[0].type || "audio/mp4";
-      const blob = new Blob(chunks, { type: useMime });
-      if (blob.size > 60000) { setError("För långt! Max ~30 sek."); setStatus("ready"); return; }
-      const reader = new FileReader();
-      reader.onloadend = async () => {
-        const b64 = reader.result.split(",")[1];
-        if (!b64) { setError("Läsfel — försök igen."); setStatus("ready"); return; }
-        try {
-          await ablyCh.current.publish("voice", {
-            from: playerName, to: target,
-            audioB64: b64, mime: useMime,
-            timestamp: Date.now()
-          });
-        } catch(err) { setError("Sändfel: " + err.message); }
-        setStatus("ready");
-      };
-      reader.readAsDataURL(blob);
-    };
-    mr.stop();
     setStatus("ready");
+    stopCapture();
+
+    const samples = samplesRef.current;
+    if (samples.length < 800) { setError("För kort! Tryck och tala, tryck igen för att skicka."); return; }
+
+    // Encode as WAV at 8000 Hz
+    const blob = encodeWAV(new Float32Array(samples), 8000);
+    if (blob.size > 60000) {
+      // Trim to fit — take first 55000 bytes worth of samples
+      const maxSamples = Math.floor((55000 - 44) / 2);
+      const trimmed = encodeWAV(new Float32Array(samples.slice(0, maxSamples)), 8000);
+      sendBlob(trimmed);
+    } else {
+      sendBlob(blob);
+    }
+  }
+
+  async function sendBlob(blob) {
+    const reader = new FileReader();
+    reader.onloadend = async () => {
+      const b64 = reader.result.split(",")[1];
+      if (!b64) { setError("Läsfel — försök igen."); return; }
+      try {
+        await ablyCh.current.publish("voice", {
+          from: playerName, to: target,
+          audioB64: b64, timestamp: Date.now()
+        });
+      } catch(err) { setError("Sändfel: " + err.message); }
+    };
+    reader.readAsDataURL(blob);
   }
 
   const isRecording = status === "recording";
@@ -889,12 +937,14 @@ function WalkieTalkieScreen({playerName, onBack}) {
             boxShadow:isRecording?"0 0 60px #e9456088":"none",
             transition:"background 0.15s",
             display:"flex",alignItems:"center",justifyContent:"center",
-            margin:"0 auto",cursor:isReady||isRecording?"pointer":"default",
+            margin:"0 auto",
+            cursor:isReady||isRecording?"pointer":"default",
           }}
         >
           {isRecording?"⏹️":"🎙️"}
         </button>
-        <div style={{fontFamily:"'Fredoka One',cursive",fontSize:20,marginTop:16,color:isRecording?"#e94560":isReady?"#27ae60":"#8892b0"}}>
+        <div style={{fontFamily:"'Fredoka One',cursive",fontSize:20,marginTop:16,
+          color:isRecording?"#e94560":isReady?"#27ae60":"#8892b0"}}>
           {isRecording
             ? `● SÄNDER... ${recSeconds}s — tryck för att skicka`
             : isReady ? "TRYCK för att börja tala"
@@ -902,11 +952,8 @@ function WalkieTalkieScreen({playerName, onBack}) {
         </div>
         {isReady && !isRecording && (
           <div style={{color:"#8892b0",fontSize:13,marginTop:4}}>
-            Skickar till: <strong style={{color:"#f5a623"}}>{target==="alla"?"Alla bilar":target}</strong>
+            Till: <strong style={{color:"#f5a623"}}>{target==="alla"?"Alla bilar":target}</strong> • max 30 sek
           </div>
-        )}
-        {isRecording && (
-          <div style={{color:"#8892b0",fontSize:12,marginTop:4}}>Max 30 sekunder</div>
         )}
       </div>
 
