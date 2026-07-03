@@ -988,6 +988,20 @@ function WalkieTalkieScreen({playerName, onBack}) {
   );
 }
 
+
+// ===== KLOSSBYGGET =====
+function KlossbyggetScreen({onBack}) {
+  return (
+    <div style={{position:"fixed",inset:0,background:"#12192b",display:"flex",flexDirection:"column",zIndex:100}}>
+      <div style={{display:"flex",alignItems:"center",gap:10,padding:"8px 12px",background:"#1a2438",borderBottom:"2px solid #38496b",flexShrink:0}}>
+        <button onClick={onBack} style={{background:"none",border:"2px solid #8892b0",borderRadius:10,color:"#8892b0",padding:"6px 12px",cursor:"pointer",fontFamily:"'Nunito',sans-serif",whiteSpace:"nowrap"}}>← Hem</button>
+        <span style={{fontFamily:"'Fredoka One',cursive",color:"#f0d264",fontSize:20}}>🧱 Klossbygget</span>
+      </div>
+      <iframe src="./klossbygget.html" style={{flex:1,border:"none",width:"100%"}} allow="autoplay"/>
+    </div>
+  );
+}
+
 // ===== PLAYER SETUP =====
 function PlayerSetup({onDone,highscores}){
   const [name,setName]=useState("");
@@ -1112,6 +1126,7 @@ function App(){
           <HomeScreen onSelect={setScreen} scores={sessionScores}/>
           <div style={{maxWidth:480,margin:"0 auto",padding:"0 16px 16px"}}>
             <button onClick={()=>setScreen("highscore")} style={btnStyle(theme.gold)}>🏆 Visa Highscore</button>
+            <button onClick={()=>setScreen("klossbygget")} style={{...btnStyle("#f0d264",true),marginTop:8,color:"#1a2438"}}>🧱 Klossbygget</button>
             <button onClick={()=>setScreen("walkie")} style={{...btnStyle("#e67e22",true),marginTop:8}}>📻 Walkie-Talkie</button>
             <button onClick={()=>setScreen("setup")} style={{...btnStyle(theme.muted,true),background:"none",border:`2px solid ${theme.muted}`,boxShadow:"none",marginTop:8}}>👤 Byt spelare</button>
           </div>
@@ -1119,6 +1134,7 @@ function App(){
       )}
       {screen==="highscore"&&<HighscoreScreen highscores={highscores} currentPlayer={player} onBack={()=>setScreen("home")}/>}
       {screen==="walkie"&&<WalkieTalkieScreen playerName={player} onBack={()=>setScreen("home")}/>}
+      {screen==="klossbygget"&&<KlossbyggetScreen onBack={()=>setScreen("home")}/>}
       {gameInfo&&gameMap[screen]&&(
         <GameWrapper title={gameInfo.label} emoji={gameInfo.emoji} color={gameInfo.color} onBack={()=>setScreen("home")}>
           {gameMap[screen]}
