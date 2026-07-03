@@ -703,7 +703,7 @@ const CHANNEL_NAME = "bilresa-walkie";
 function encodeWAV(samples, sampleRate) {
   const buffer = new ArrayBuffer(44 + samples.length * 2);
   const view = new DataView(buffer);
-  function writeStr(o, s) { for (let i=0;i<s.length;i++) view.setUint8(o+i, s.charCodeAt(i)); }
+  function writeStr(o,s){for(let i=0;i<s.length;i++)view.setUint8(o+i,s.charCodeAt(i));}
   writeStr(0,"RIFF"); view.setUint32(4,36+samples.length*2,true);
   writeStr(8,"WAVE"); writeStr(12,"fmt ");
   view.setUint32(16,16,true); view.setUint16(20,1,true); view.setUint16(22,1,true);
@@ -717,6 +717,9 @@ function encodeWAV(samples, sampleRate) {
   }
   return new Blob([buffer],{type:"audio/wav"});
 }
+
+// Max safe b64 payload = floor(65000 * 3/4) bytes of binary
+const MAX_CHUNK_BYTES = Math.floor(65000 * 0.74);
 
 function WalkieTalkieScreen({playerName, onBack}) {
   const [status, setStatus] = useState("idle");
@@ -734,6 +737,8 @@ function WalkieTalkieScreen({playerName, onBack}) {
   const streamRef = useRef(null);
   const samplesRef = useRef([]);
   const statusRef = useRef("idle");
+  // Buffer incoming chunks: msgId -> {total, parts: {}}
+  const incomingRef = useRef({});
 
   function log(msg) {
     console.log("[WT]", msg);
@@ -745,7 +750,7 @@ function WalkieTalkieScreen({playerName, onBack}) {
   useEffect(() => {
     async function connect() {
       try {
-        log("Ansluter till Ably...");
+        log("Ansluter...");
         setStatusBoth("connecting");
         const client = new Ably.Realtime({ key: ABLY_KEY, clientId: playerName });
         ablyClient.current = client;
@@ -753,32 +758,48 @@ function WalkieTalkieScreen({playerName, onBack}) {
           client.connection.on("connected", res);
           client.connection.on("failed", rej);
         });
-        log("Ansluten!");
         const ch = client.channels.get(CHANNEL_NAME);
         ablyCh.current = ch;
+
         await ch.subscribe("voice", (msg) => {
-          const { from, audioB64, to } = msg.data;
+          const { from, to, msgId, part, total, audioB64 } = msg.data;
           if (from === playerName) return;
           if (to !== "alla" && to !== playerName) return;
-          log("Mottog ljud från " + from);
-          try {
-            const binary = atob(audioB64);
-            const bytes = new Uint8Array(binary.length);
-            for (let i=0;i<binary.length;i++) bytes[i]=binary.charCodeAt(i);
-            const blob = new Blob([bytes],{type:"audio/wav"});
-            const url = URL.createObjectURL(blob);
-            setMessages(m=>[...m.slice(-19),{from,url,id:Date.now(),label:to==="alla"?"→Alla":"→dig"}]);
-            new Audio(url).play().catch(e=>log("Uppspelningsfel: "+e.message));
-          } catch(ex) { log("Avkodningsfel: "+ex.message); }
+
+          // Assemble chunks
+          if (!incomingRef.current[msgId]) incomingRef.current[msgId] = { total, parts: {} };
+          incomingRef.current[msgId].parts[part] = audioB64;
+          const assembled = incomingRef.current[msgId];
+          const gotParts = Object.keys(assembled.parts).length;
+          log(`Del ${part+1}/${total} från ${from}`);
+
+          if (gotParts === assembled.total) {
+            delete incomingRef.current[msgId];
+            // Reconstruct full b64
+            let fullB64 = "";
+            for (let i = 0; i < assembled.total; i++) fullB64 += assembled.parts[i];
+            try {
+              const binary = atob(fullB64);
+              const bytes = new Uint8Array(binary.length);
+              for (let i=0;i<binary.length;i++) bytes[i]=binary.charCodeAt(i);
+              const blob = new Blob([bytes],{type:"audio/wav"});
+              const url = URL.createObjectURL(blob);
+              const label = to === "alla" ? "→ Alla" : "→ dig";
+              setMessages(m=>[...m.slice(-19),{from,url,id:Date.now(),label}]);
+              log("Spelar upp från " + from);
+              new Audio(url).play().catch(e=>log("Uppspelningsfel: "+e.message));
+            } catch(ex) { log("Avkodningsfel: "+ex.message); }
+          }
         });
-        await ch.presence.enter({name:playerName});
+
+        await ch.presence.enter({ name: playerName });
         const present = await ch.presence.get();
         setOnlineUsers(present.map(p=>p.clientId).filter(u=>u!==playerName));
         ch.presence.subscribe(()=>{
           ch.presence.get().then(p=>setOnlineUsers(p.map(x=>x.clientId).filter(u=>u!==playerName)));
         });
         setStatusBoth("ready");
-        log("Redo att sända!");
+        log("Redo!");
       } catch(e) {
         log("Fel: "+e.message);
         setError("Anslutningsfel: "+e.message);
@@ -802,53 +823,40 @@ function WalkieTalkieScreen({playerName, onBack}) {
   }
 
   function toggleRecording() {
-    log("Toggle tryckt, statusRef=" + statusRef.current);
+    log("Toggle, status=" + statusRef.current);
     if (statusRef.current === "recording") stopRecording();
     else if (statusRef.current === "ready") startRecording();
-    else log("Ignorerar toggle, status=" + statusRef.current);
   }
 
   async function startRecording() {
-    log("Startar inspelning...");
-    setError("");
-    setRecSeconds(0);
+    log("Startar...");
+    setError(""); setRecSeconds(0);
     samplesRef.current = [];
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
-        audio:{channelCount:1,echoCancellation:true,noiseSuppression:true}
+        audio:{ channelCount:1, echoCancellation:true, noiseSuppression:true }
       });
       streamRef.current = stream;
-      log("Mikrofon OK, skapar AudioContext...");
-
       const ctx = new (window.AudioContext||window.webkitAudioContext)();
       audioCtxRef.current = ctx;
-      log("AudioContext sampleRate=" + ctx.sampleRate);
-
+      log("AudioCtx sampleRate=" + ctx.sampleRate);
       const source = ctx.createMediaStreamSource(stream);
       const processor = ctx.createScriptProcessor(4096,1,1);
       processorRef.current = processor;
-
-      let chunkCount = 0;
+      const ratio = Math.max(1, Math.round(ctx.sampleRate / 8000));
       processor.onaudioprocess = (e) => {
-        chunkCount++;
         const data = e.inputBuffer.getChannelData(0);
-        // Downsample to 8000hz
-        const ratio = Math.max(1, Math.round(ctx.sampleRate / 8000));
         for (let i=0;i<data.length;i+=ratio) samplesRef.current.push(data[i]);
-        if (chunkCount % 10 === 0) log("Chunks: "+chunkCount+" samples: "+samplesRef.current.length);
       };
-
       source.connect(processor);
       processor.connect(ctx.destination);
       setStatusBoth("recording");
-      log("Inspelning igång!");
-
-      let secs = 0;
+      let secs=0;
       timerRef.current = setInterval(()=>{
-        secs++;
-        setRecSeconds(secs);
-        if (secs >= 30) { log("Auto-stopp 30s"); stopRecording(); }
-      }, 1000);
+        secs++; setRecSeconds(secs);
+        if(secs>=60){ log("Auto-stopp 60s"); stopRecording(); }
+      },1000);
+      log("Inspelning igång!");
     } catch(ex) {
       log("Mikrofonfel: "+ex.message);
       setError("Mikrofonfel: "+ex.message);
@@ -860,40 +868,42 @@ function WalkieTalkieScreen({playerName, onBack}) {
     clearInterval(timerRef.current);
     setStatusBoth("ready");
     stopCapture();
-
     const samples = samplesRef.current;
-    if (samples.length < 800) {
-      log("För få samples: " + samples.length);
-      setError("För kort! Prova igen — tryck 🎙️, tala, tryck ⏹️");
-      return;
-    }
+    if (samples.length < 800) { setError("För kort! Tala och tryck ⏹️ för att skicka."); return; }
 
     const blob = encodeWAV(new Float32Array(samples), 8000);
-    log("WAV storlek: " + blob.size + " bytes");
+    log("WAV=" + blob.size + " bytes, MAX_CHUNK=" + MAX_CHUNK_BYTES);
 
-    let finalBlob = blob;
-    if (blob.size > 58000) {
-      const maxS = Math.floor((55000-44)/2);
-      finalBlob = encodeWAV(new Float32Array(samples.slice(0,maxS)), 8000);
-      log("Klippt till: " + finalBlob.size + " bytes");
+    // Convert full WAV to ArrayBuffer, split into chunks
+    const arrayBuf = await blob.arrayBuffer();
+    const bytes = new Uint8Array(arrayBuf);
+
+    // Split into chunks of MAX_CHUNK_BYTES bytes
+    const chunks = [];
+    for (let i=0; i<bytes.length; i+=MAX_CHUNK_BYTES) {
+      chunks.push(bytes.slice(i, i+MAX_CHUNK_BYTES));
     }
+    log("Delar upp i " + chunks.length + " delar");
 
-    const reader = new FileReader();
-    reader.onloadend = async () => {
-      const b64 = reader.result.split(",")[1];
-      if (!b64) { log("b64 är null!"); setError("Läsfel — försök igen."); return; }
-      log("Skickar " + b64.length + " b64-tecken...");
-      try {
+    const msgId = Date.now() + "_" + Math.random().toString(36).slice(2,7);
+    try {
+      for (let i=0; i<chunks.length; i++) {
+        // Convert chunk to base64
+        let binary = "";
+        chunks[i].forEach(b => binary += String.fromCharCode(b));
+        const b64 = btoa(binary);
+        log(`Skickar del ${i+1}/${chunks.length} (${b64.length} b64-tecken)`);
         await ablyCh.current.publish("voice", {
-          from:playerName, to:target, audioB64:b64, timestamp:Date.now()
+          from: playerName, to: target,
+          msgId, part: i, total: chunks.length,
+          audioB64: b64
         });
-        log("Skickat OK!");
-      } catch(err) {
-        log("Sändfel: "+err.message);
-        setError("Sändfel: "+err.message);
       }
-    };
-    reader.readAsDataURL(finalBlob);
+      log("Allt skickat!");
+    } catch(err) {
+      log("Sändfel: "+err.message);
+      setError("Sändfel: "+err.message);
+    }
   }
 
   const isRecording = status === "recording";
@@ -943,11 +953,9 @@ function WalkieTalkieScreen({playerName, onBack}) {
             width:170,height:170,borderRadius:"50%",
             background:isRecording?"#e94560":isReady?"#27ae60":"#444",
             border:`7px solid ${isRecording?"#ff6b85":isReady?"#2ecc71":"#666"}`,
-            fontSize:60,
-            boxShadow:isRecording?"0 0 60px #e9456088":"none",
-            transition:"background 0.15s",
-            display:"flex",alignItems:"center",justifyContent:"center",
-            margin:"0 auto",
+            fontSize:60,boxShadow:isRecording?"0 0 60px #e9456088":"none",
+            transition:"background 0.15s",display:"flex",alignItems:"center",
+            justifyContent:"center",margin:"0 auto",
             cursor:isReady||isRecording?"pointer":"default",
           }}
         >{isRecording?"⏹️":"🎙️"}</button>
@@ -955,12 +963,11 @@ function WalkieTalkieScreen({playerName, onBack}) {
           color:isRecording?"#e94560":isReady?"#27ae60":"#8892b0"}}>
           {isRecording?`● SÄNDER... ${recSeconds}s`:isReady?"TRYCK för att tala":status==="connecting"?"Ansluter...":"Frånkopplad"}
         </div>
-        {isReady&&!isRecording&&<div style={{color:"#8892b0",fontSize:13,marginTop:4}}>Till: <strong style={{color:"#f5a623"}}>{target==="alla"?"Alla bilar":target}</strong></div>}
+        {isReady&&!isRecording&&<div style={{color:"#8892b0",fontSize:13,marginTop:4}}>Till: <strong style={{color:"#f5a623"}}>{target==="alla"?"Alla bilar":target}</strong> • max 60 sek</div>}
       </div>
 
-      {/* Debug log */}
       <div style={{background:"#0d1117",borderRadius:12,padding:10,marginBottom:14,fontFamily:"monospace",fontSize:11,color:"#27ae60"}}>
-        {debugLog.length===0?<span style={{color:"#444"}}>Logg visas här...</span>:debugLog.map((l,i)=><div key={i}>{l}</div>)}
+        {debugLog.length===0?<span style={{color:"#444"}}>Logg...</span>:debugLog.map((l,i)=><div key={i}>{l}</div>)}
       </div>
 
       {messages.length>0&&(
