@@ -775,13 +775,15 @@ function WalkieTalkieScreen({playerName, onBack}) {
 
           if (gotParts === assembled.total) {
             delete incomingRef.current[msgId];
-            // Reconstruct full b64
-            let fullB64 = "";
-            for (let i = 0; i < assembled.total; i++) fullB64 += assembled.parts[i];
+            // Decode each chunk to bytes separately, then concatenate
             try {
-              const binary = atob(fullB64);
-              const bytes = new Uint8Array(binary.length);
-              for (let i=0;i<binary.length;i++) bytes[i]=binary.charCodeAt(i);
+              const allBytes = [];
+              for (let p = 0; p < assembled.total; p++) {
+                const b64 = assembled.parts[p];
+                const binary = atob(b64);
+                for (let j=0;j<binary.length;j++) allBytes.push(binary.charCodeAt(j));
+              }
+              const bytes = new Uint8Array(allBytes);
               const blob = new Blob([bytes],{type:"audio/wav"});
               const url = URL.createObjectURL(blob);
               const label = to === "alla" ? "→ Alla" : "→ dig";
