@@ -54,6 +54,9 @@ const games=[
   {id:"snake",label:"Orm",emoji:"🐍",color:"#2ecc71"},
   {id:"tetris",label:"Tetris",emoji:"🟦",color:"#8e44ad"},
   {id:"bingo",label:"Vägbingo",emoji:"🎯",color:"#e67e22"},
+  {id:"ubongo",label:"Ubongo",emoji:"🧩",color:"#9b59b6"},
+  {id:"battleship",label:"Sänka Fartyg",emoji:"⚓",color:"#2980b9"},
+  {id:"flipper",label:"Flipper",emoji:"🎰",color:"#f39c12"},
 ];
 
 function HomeScreen({onSelect,scores}){
@@ -737,6 +740,46 @@ function WalkieTalkieScreen({playerName, onBack}) {
   const streamRef = useRef(null);
   const samplesRef = useRef([]);
   const statusRef = useRef("idle");
+  const playerRef = useRef(null);      // persistent <audio> element, unlocked on first tap
+  const audioUnlocked = useRef(false);
+  const playQueue = useRef([]);
+
+  // Unlock audio on first user interaction — required for iOS autoplay
+  function unlockAudio(){
+    if(audioUnlocked.current) return;
+    if(!playerRef.current){
+      playerRef.current = new Audio();
+      playerRef.current.playsInline = true;
+    }
+    // Play a tiny silent WAV to unlock
+    playerRef.current.src = "data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAIA+AAACABAAZGF0YQAAAAA=";
+    playerRef.current.play().then(()=>{
+      audioUnlocked.current = true;
+      log("Ljud upplåst — autouppspelning aktiv!");
+    }).catch(()=>{});
+  }
+
+  function playIncoming(url){
+    if(!playerRef.current){
+      playerRef.current = new Audio();
+      playerRef.current.playsInline = true;
+    }
+    const p = playerRef.current;
+    if(!p.paused){
+      // Queue if something is playing
+      playQueue.current.push(url);
+      return;
+    }
+    p.src = url;
+    p.onended = () => {
+      if(playQueue.current.length > 0){
+        const next = playQueue.current.shift();
+        p.src = next;
+        p.play().catch(()=>{});
+      }
+    };
+    p.play().catch(e => log("Autoplay blockerad — tryck 🎙️ en gång först"));
+  }
   // Buffer incoming chunks: msgId -> {total, parts: {}}
   const incomingRef = useRef({});
 
@@ -798,7 +841,7 @@ function WalkieTalkieScreen({playerName, onBack}) {
               const label = to === "alla" ? "→ Alla" : "→ dig";
               setMessages(m=>[...m.slice(-19),{from,url,id:Date.now(),label}]);
               log("Spelar upp från " + from);
-              new Audio(url).play().catch(e=>log("Uppspelningsfel: "+e.message));
+              playIncoming(url);
             } catch(ex) { log("Avkodningsfel: "+ex.message); }
           }
         });
@@ -834,6 +877,7 @@ function WalkieTalkieScreen({playerName, onBack}) {
   }
 
   function toggleRecording() {
+    unlockAudio();
     log("Toggle, status=" + statusRef.current);
     if (statusRef.current === "recording") stopRecording();
     else if (statusRef.current === "ready") startRecording();
@@ -1013,6 +1057,928 @@ function KlossbyggetScreen({onBack}) {
   );
 }
 
+// ===== UBONGO =====
+const UBONGO_SHAPES=[
+  [[1,1],[1,0]],[[1,1,1]],[[1,0],[1,1]],[[1,1],[0,1]],
+  [[1],[1],[1]],[[1,1,1],[0,1,0]],[[0,1],[1,1],[1,0]],
+  [[1,0],[1,1],[0,1]],[[1,1],[1,1]],[[1,0,0],[1,1,1]],
+  [[0,0,1],[1,1,1]],[[1,1,0],[0,1,1]],
+];
+const UCOLORS=["#e94560","#3498db","#27ae60","#f5a623","#9b59b6","#1abc9c"];
+function rotShape(shape,times){let s=shape;for(let t=0;t<times%4;t++){s=s[0].map((_,i)=>s.map(r=>r[i]).reverse());}return s;}
+
+// Generate a puzzle: place pieces randomly on a grid — the union becomes the board region.
+// Guarantees the puzzle is solvable!
+function generateUbongo(numPieces){
+  const G=7;
+  for(let attempt=0; attempt<60; attempt++){
+    const grid=Array(G*G).fill(false);
+    const shapeIdxs=shuffle([...Array(UBONGO_SHAPES.length).keys()]).slice(0,numPieces);
+    let ok=true;
+    for(const si of shapeIdxs){
+      let placed=false;
+      for(let tries=0; tries<80 && !placed; tries++){
+        const rot=Math.floor(Math.random()*4);
+        const shape=rotShape(UBONGO_SHAPES[si],rot);
+        const h=shape.length, w=shape[0].length;
+        const row=Math.floor(Math.random()*(G-h+1));
+        const col=Math.floor(Math.random()*(G-w+1));
+        const cells=[];
+        let fits=true, touches=false;
+        for(let r=0;r<h;r++)for(let c=0;c<w;c++)if(shape[r][c]){
+          const idx=(row+r)*G+(col+c);
+          if(grid[idx]){fits=false;break;}
+          cells.push(idx);
+          // check adjacency to existing region
+          const rr=row+r, cc=col+c;
+          if((rr>0&&grid[(rr-1)*G+cc])||(rr<G-1&&grid[(rr+1)*G+cc])||
+             (cc>0&&grid[rr*G+cc-1])||(cc<G-1&&grid[rr*G+cc+1])) touches=true;
+        }
+        const isFirst = !grid.some(v=>v);
+        if(fits && (isFirst || touches)){
+          cells.forEach(i=>grid[i]=true);
+          placed=true;
+        }
+      }
+      if(!placed){ok=false;break;}
+    }
+    if(!ok) continue;
+    // Extract bounding box
+    let minR=G,maxR=0,minC=G,maxC=0;
+    for(let r=0;r<G;r++)for(let c=0;c<G;c++)if(grid[r*G+c]){
+      minR=Math.min(minR,r);maxR=Math.max(maxR,r);
+      minC=Math.min(minC,c);maxC=Math.max(maxC,c);
+    }
+    const rows=maxR-minR+1, cols=maxC-minC+1;
+    if(rows>6||cols>6) continue; // keep board compact
+    const region=[];
+    for(let r=0;r<rows;r++)for(let c=0;c<cols;c++){
+      region.push(grid[(minR+r)*G+(minC+c)]);
+    }
+    return {rows, cols, region, shapeIdxs};
+  }
+  // Fallback: single row board
+  return {rows:1, cols:3, region:[true,true,true], shapeIdxs:[4]};
+}
+
+function UbongoGame({onScore}){
+  const [puzzle,setPuzzle]=useState(()=>generateUbongo(4));
+  const [placed,setPlaced]=useState(()=>Array(puzzle.rows*puzzle.cols).fill(null));
+  const [pieces,setPieces]=useState(()=>puzzle.shapeIdxs.map((idx,i)=>({id:i,shapeIdx:idx,color:UCOLORS[i%UCOLORS.length],used:false})));
+  const [selected,setSelected]=useState(null);
+  const [rotation,setRotation]=useState(0);
+  const [won,setWon]=useState(false);
+  const [scored,setScored]=useState(false);
+  const [startTime,setStartTime]=useState(Date.now());
+
+  const {rows,cols,region}=puzzle;
+  const CELL=Math.min(56,Math.floor(300/Math.max(rows,cols)));
+
+  function newPuzzle(){
+    const p=generateUbongo(4);
+    setPuzzle(p);
+    setPlaced(Array(p.rows*p.cols).fill(null));
+    setPieces(p.shapeIdxs.map((idx,i)=>({id:i,shapeIdx:idx,color:UCOLORS[i%UCOLORS.length],used:false})));
+    setSelected(null);setRotation(0);setWon(false);setScored(false);
+    setStartTime(Date.now());
+  }
+
+  function tryCells(cellIdx){
+    if(selected===null)return[];
+    const piece=pieces.find(p=>p.id===selected&&!p.used);
+    if(!piece)return[];
+    const shape=rotShape(UBONGO_SHAPES[piece.shapeIdx],rotation);
+    const row=Math.floor(cellIdx/cols),col=cellIdx%cols;
+    const cells=[];
+    for(let r=0;r<shape.length;r++)for(let c=0;c<shape[r].length;c++)if(shape[r][c]){
+      const nr=row+r,nc=col+c;
+      if(nr>=rows||nc>=cols)return[];
+      const idx=nr*cols+nc;
+      if(!region[idx]||placed[idx])return[];
+      cells.push(idx);
+    }
+    return cells;
+  }
+
+  function placePiece(cellIdx){
+    if(selected===null||won)return;
+    const piece=pieces.find(p=>p.id===selected&&!p.used);
+    if(!piece)return;
+    const cells=tryCells(cellIdx);
+    if(cells.length===0)return;
+    const np=[...placed];cells.forEach(i=>np[i]=piece.color);
+    setPieces(ps=>ps.map(p=>p.id===selected?{...p,used:true}:p));
+    setPlaced(np);setSelected(null);setRotation(0);
+    // Win: every region cell filled
+    if(region.every((isCell,i)=>!isCell||np[i])){
+      const secs=Math.round((Date.now()-startTime)/1000);
+      const pts=Math.max(2,20-Math.floor(secs/5));
+      setWon(true);if(!scored){onScore(pts);setScored(true);}
+    }
+  }
+
+  function removePiece(cellIdx){
+    const color=placed[cellIdx];if(!color||won)return;
+    const np=placed.map(v=>v===color?null:v);setPlaced(np);
+    setPieces(ps=>ps.map(p=>p.color===color?{...p,used:false}:p));
+  }
+
+  return(
+    <div>
+      {won
+        ?<div style={{textAlign:"center",marginBottom:12}}>
+          <div style={{fontSize:48}}>🎉</div>
+          <div style={{fontFamily:theme.font,color:theme.gold,fontSize:24}}>UBONGO!</div>
+          <button onClick={newPuzzle} style={btnStyle(theme.blue)}>Nytt pussel</button>
+        </div>
+        :<div style={{color:theme.muted,fontSize:13,marginBottom:10}}>Fyll HELA formen med alla bitar! Välj bit → tryck på brädet (biten placeras med övre vänstra hörnet där du trycker).</div>
+      }
+      {/* Pieces */}
+      <div style={{display:"flex",gap:10,flexWrap:"wrap",marginBottom:10}}>
+        {pieces.map(p=>{
+          const shape=rotShape(UBONGO_SHAPES[p.shapeIdx],p.id===selected?rotation:0);
+          return(
+            <div key={p.id} onClick={()=>{if(!p.used&&!won){setSelected(p.id===selected?null:p.id);setRotation(0);}}}
+              style={{background:p.used?"#111":p.id===selected?p.color+"dd":p.color+"55",border:`3px solid ${p.id===selected?"#fff":p.used?"#222":"#444"}`,borderRadius:10,padding:6,cursor:p.used?"default":"pointer",opacity:p.used?0.2:1}}>
+              {shape.map((row,ri)=>(
+                <div key={ri} style={{display:"flex"}}>
+                  {row.map((v,ci)=><div key={ci} style={{width:16,height:16,background:v?p.color:"transparent",borderRadius:3,margin:1}}/>)}
+                </div>
+              ))}
+            </div>
+          );
+        })}
+      </div>
+      {selected!=null&&(
+        <div style={{display:"flex",gap:8,marginBottom:10}}>
+          <button onClick={()=>setRotation(r=>(r+1)%4)} style={{...btnStyle(theme.blue,false),marginTop:0,padding:"8px 20px"}}>↻ Rotera</button>
+        </div>
+      )}
+      {/* Board — only region cells visible */}
+      <div style={{display:"grid",gridTemplateColumns:`repeat(${cols},${CELL}px)`,gap:3}}>
+        {placed.map((cell,i)=>{
+          if(!region[i]) return <div key={i} style={{width:CELL,height:CELL}}/>;
+          return(
+            <div key={i}
+              onClick={()=>cell?removePiece(i):placePiece(i)}
+              style={{width:CELL,height:CELL,borderRadius:8,cursor:"pointer",
+                background:cell||"#16213e",
+                border:`2px solid ${cell?"transparent":"#3a4a6a"}`,
+                boxShadow:cell?"none":"inset 0 0 0 1px #4a5a7a"}}/>
+          );
+        })}
+      </div>
+      <div style={{color:theme.muted,fontSize:11,marginTop:8}}>Tryck på en placerad bit för att ta bort den. Brädet är exakt lika stort som bitarna tillsammans!</div>
+    </div>
+  );
+}
+
+// ===== SÄNKA FARTYG (Pass & Play) =====
+function BattleshipGame({onScore}){
+  const SIZE=8;
+  const SHIPS=[4,3,3,2,2];
+  // phase: p1place | p2place | p1turn | p2turn | won1 | won2
+  // handoff: null or {nextPhase, toPlayer} — shows "byt spelare"-screen
+  const [phase,setPhase]=useState("p1place");
+  const [handoff,setHandoff]=useState(null);
+  const [board1,setBoard1]=useState(Array(SIZE*SIZE).fill(null));
+  const [board2,setBoard2]=useState(Array(SIZE*SIZE).fill(null));
+  const [shots1,setShots1]=useState(Array(SIZE*SIZE).fill(null)); // p1:s skott mot p2
+  const [shots2,setShots2]=useState(Array(SIZE*SIZE).fill(null)); // p2:s skott mot p1
+  const [horiz,setHoriz]=useState(true);
+  const [shipsLeft,setShipsLeft]=useState([...SHIPS]);
+  const [lastResult,setLastResult]=useState(null); // "hit"|"miss"|"sunk" feedback
+  const [scored,setScored]=useState(false);
+
+  function goHandoff(nextPhase, toPlayer){
+    setLastResult(null);
+    setHandoff({nextPhase, toPlayer});
+  }
+
+  function placeShip(idx){
+    const board = phase==="p1place" ? board1 : board2;
+    const setBoard = phase==="p1place" ? setBoard1 : setBoard2;
+    const len=shipsLeft[0];
+    const row=Math.floor(idx/SIZE),col=idx%SIZE;
+    const cells=[];
+    for(let i=0;i<len;i++){
+      const nr=horiz?row:row+i,nc=horiz?col+i:col;
+      if(nr>=SIZE||nc>=SIZE)return;
+      const ci=nr*SIZE+nc;
+      if(board[ci])return;
+      cells.push(ci);
+    }
+    const nb=[...board];cells.forEach(c=>nb[c]="ship");setBoard(nb);
+    const nl=shipsLeft.slice(1);setShipsLeft(nl);
+    if(nl.length===0){
+      if(phase==="p1place"){
+        setShipsLeft([...SHIPS]);setHoriz(true);
+        goHandoff("p2place","Spelare 2");
+      } else {
+        goHandoff("p1turn","Spelare 1");
+      }
+    }
+  }
+
+  function randomShip(){
+    const board = phase==="p1place" ? board1 : board2;
+    const setBoard = phase==="p1place" ? setBoard1 : setBoard2;
+    const len=shipsLeft[0];
+    for(let tries=0;tries<200;tries++){
+      const h=Math.random()<0.5;
+      const row=Math.floor(Math.random()*(h?SIZE:SIZE-len+1));
+      const col=Math.floor(Math.random()*(h?SIZE-len+1:SIZE));
+      const cells=[];let ok=true;
+      for(let i=0;i<len;i++){
+        const nr=h?row:row+i,nc=h?col+i:col;
+        if(nr>=SIZE||nc>=SIZE||board[nr*SIZE+nc]){ok=false;break;}
+        cells.push(nr*SIZE+nc);
+      }
+      if(ok){
+        const nb=[...board];cells.forEach(c=>nb[c]="ship");setBoard(nb);
+        const nl=shipsLeft.slice(1);setShipsLeft(nl);
+        if(nl.length===0){
+          if(phase==="p1place"){setShipsLeft([...SHIPS]);setHoriz(true);goHandoff("p2place","Spelare 2");}
+          else goHandoff("p1turn","Spelare 1");
+        }
+        return;
+      }
+    }
+  }
+
+  function shoot(idx){
+    const isP1 = phase==="p1turn";
+    const targetBoard = isP1 ? board2 : board1;
+    const myShots = isP1 ? shots1 : shots2;
+    const setMyShots = isP1 ? setShots1 : setShots2;
+    if(myShots[idx] || lastResult==="miss") return;
+
+    const hit = targetBoard[idx]==="ship";
+    const ns=[...myShots]; ns[idx]=hit?"hit":"miss"; setMyShots(ns);
+
+    if(hit){
+      // Check win
+      if(targetBoard.every((v,i)=>v!=="ship"||ns[i]==="hit")){
+        setPhase(isP1?"won1":"won2");
+        if(!scored){onScore(15);setScored(true);}
+        return;
+      }
+      setLastResult("hit"); // TRÄFF — skjut igen!
+    } else {
+      setLastResult("miss"); // MISS — visa knapp för att lämna över
+    }
+  }
+
+  function endTurn(){
+    const isP1 = phase==="p1turn";
+    goHandoff(isP1?"p2turn":"p1turn", isP1?"Spelare 2":"Spelare 1");
+  }
+
+  function resetAll(){
+    setPhase("p1place");setHandoff(null);
+    setBoard1(Array(SIZE*SIZE).fill(null));setBoard2(Array(SIZE*SIZE).fill(null));
+    setShots1(Array(SIZE*SIZE).fill(null));setShots2(Array(SIZE*SIZE).fill(null));
+    setShipsLeft([...SHIPS]);setHoriz(true);setLastResult(null);setScored(false);
+  }
+
+  function cellBg(board,shots,idx,showShips){
+    const s=shots[idx];
+    if(s==="hit")return"#e94560";
+    if(s==="miss")return"#3498db44";
+    if(showShips&&board[idx]==="ship")return"#27ae6077";
+    return"#16213e";
+  }
+
+  // ===== HANDOFF SCREEN =====
+  if(handoff){
+    return(
+      <div style={{textAlign:"center",padding:40}}>
+        <div style={{fontSize:56}}>🙈</div>
+        <div style={{fontFamily:theme.font,color:theme.gold,fontSize:24,marginBottom:8}}>Byt spelare!</div>
+        <div style={{color:theme.text,fontSize:16,marginBottom:24}}>
+          Ge telefonen till <strong style={{color:theme.blue}}>{handoff.toPlayer}</strong>
+        </div>
+        <button onClick={()=>{setPhase(handoff.nextPhase);setHandoff(null);}} style={btnStyle(theme.green)}>
+          {handoff.toPlayer} är redo →
+        </button>
+      </div>
+    );
+  }
+
+  // ===== WIN SCREEN =====
+  if(phase==="won1"||phase==="won2"){
+    return(
+      <div style={{textAlign:"center"}}>
+        <div style={{fontSize:56}}>🏆</div>
+        <div style={{fontFamily:theme.font,color:theme.gold,fontSize:26,marginBottom:16}}>
+          {phase==="won1"?"Spelare 1":"Spelare 2"} vann!
+        </div>
+        <button onClick={resetAll} style={btnStyle(theme.blue)}>Spela igen</button>
+      </div>
+    );
+  }
+
+  // ===== PLACEMENT =====
+  if(phase==="p1place"||phase==="p2place"){
+    const board = phase==="p1place"?board1:board2;
+    const playerLabel = phase==="p1place"?"Spelare 1":"Spelare 2";
+    return(
+      <div>
+        <div style={{fontFamily:theme.font,color:theme.gold,fontSize:18,marginBottom:4}}>
+          ⚓ {playerLabel} placerar skepp
+        </div>
+        <div style={{display:"flex",gap:8,alignItems:"center",marginBottom:10,flexWrap:"wrap"}}>
+          <span style={{background:theme.card,borderRadius:10,padding:"6px 12px",fontFamily:theme.font,color:theme.text,fontSize:14}}>
+            Nästa: {"■".repeat(shipsLeft[0]||0)} ({shipsLeft[0]} rutor)
+          </span>
+          <button onClick={()=>setHoriz(h=>!h)} style={{padding:"6px 14px",borderRadius:20,border:`2px solid ${theme.blue}`,background:theme.blue+"33",color:theme.blue,fontFamily:theme.font,fontSize:14,cursor:"pointer"}}>
+            {horiz?"↔ Liggande":"↕ Stående"}
+          </button>
+        </div>
+        <div style={{color:theme.muted,fontSize:12,marginBottom:6}}>Kvar att placera: {shipsLeft.map(l=>l+"r").join(", ")}</div>
+        <div style={{display:"grid",gridTemplateColumns:`repeat(${SIZE},1fr)`,gap:2,maxWidth:310,marginBottom:8}}>
+          {board.map((v,i)=>(
+            <div key={i} onClick={()=>placeShip(i)}
+              style={{height:36,borderRadius:4,background:v==="ship"?"#27ae6077":"#16213e",border:"1px solid #2a3a5a",cursor:"pointer"}}/>
+          ))}
+        </div>
+        <button onClick={randomShip} style={{...btnStyle(theme.muted,false),fontSize:13,background:"none",border:`1px solid ${theme.muted}`,boxShadow:"none",marginTop:0}}>
+          🎲 Slumpa nästa skepp
+        </button>
+      </div>
+    );
+  }
+
+  // ===== SHOOTING TURN =====
+  const isP1 = phase==="p1turn";
+  const playerLabel = isP1?"Spelare 1":"Spelare 2";
+  const myBoard = isP1?board1:board2;
+  const enemyShotsAtMe = isP1?shots2:shots1;
+  const myShots = isP1?shots1:shots2;
+  const enemyBoard = isP1?board2:board1;
+
+  return(
+    <div>
+      <div style={{fontFamily:theme.font,color:theme.gold,fontSize:18,marginBottom:8}}>
+        🎯 {playerLabel}:s tur
+      </div>
+
+      {lastResult==="hit"&&(
+        <div style={{background:theme.green+"22",border:`2px solid ${theme.green}`,borderRadius:12,padding:10,marginBottom:10,textAlign:"center"}}>
+          <span style={{fontFamily:theme.font,color:theme.green,fontSize:18}}>💥 TRÄFF! Skjut igen!</span>
+        </div>
+      )}
+      {lastResult==="miss"&&(
+        <div style={{background:theme.blue+"22",border:`2px solid ${theme.blue}`,borderRadius:12,padding:10,marginBottom:10,textAlign:"center"}}>
+          <div style={{fontFamily:theme.font,color:theme.blue,fontSize:18,marginBottom:8}}>💦 MISS!</div>
+          <button onClick={endTurn} style={{...btnStyle(theme.gold,false),marginTop:0}}>Lämna över →</button>
+        </div>
+      )}
+
+      <div style={{marginBottom:12}}>
+        <div style={{fontFamily:theme.font,color:theme.accent,fontSize:13,marginBottom:4}}>🎯 SKJUT HÄR (motståndarens hav):</div>
+        <div style={{display:"grid",gridTemplateColumns:`repeat(${SIZE},1fr)`,gap:2,maxWidth:310}}>
+          {enemyBoard.map((v,i)=>(
+            <div key={i} onClick={()=>shoot(i)}
+              style={{height:36,borderRadius:4,
+                background:cellBg(enemyBoard,myShots,i,false),
+                border:`1px solid ${myShots[i]?"#555":"#3a5a8a"}`,
+                cursor:myShots[i]||lastResult==="miss"?"default":"pointer"}}>
+              {myShots[i]==="hit"&&<span style={{fontSize:18,display:"block",textAlign:"center",lineHeight:"34px"}}>💥</span>}
+              {myShots[i]==="miss"&&<span style={{fontSize:14,display:"block",textAlign:"center",lineHeight:"34px",opacity:0.6}}>•</span>}
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div>
+        <div style={{fontFamily:theme.font,color:theme.muted,fontSize:12,marginBottom:4}}>🚢 Ditt hav (motståndarens skott):</div>
+        <div style={{display:"grid",gridTemplateColumns:`repeat(${SIZE},1fr)`,gap:1,maxWidth:230}}>
+          {myBoard.map((v,i)=>(
+            <div key={i} style={{height:26,borderRadius:3,
+              background:cellBg(myBoard,enemyShotsAtMe,i,true),
+              border:"1px solid #2a3a5a"}}/>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ===== FLIPPER - ROADTRIP ÄVENTYR (physics v2) =====
+function FlipperGame({onScore}){
+  const canvasRef = useRef(null);
+  const gRef = useRef(null);
+  const [disp, setDisp] = useState({score:0, balls:3, over:false, started:false, launching:false});
+  const rafRef = useRef(null);
+  const scoredRef = useRef(false);
+
+  const W = 430, H = 580, WALL = 10;
+  const LANE_W = 36;
+  const PF_R = W - WALL - LANE_W;      // inner lane wall x
+  const LANE_X = PF_R + LANE_W/2;      // ball x in lane
+  const ARCH_CX = W/2, ARCH_CY = 150, ARCH_R = (W-2*WALL)/2;
+
+  // Flippers
+  const FY = H - 90;
+  const FL = 78, FW = 18;
+  const LCX = 112, RCX = PF_R - 102;
+  const L_REST = 0.50, L_PRESS = -0.52;   // radians; positive = tip droops down
+  const R_REST = Math.PI - 0.50, R_PRESS = Math.PI + 0.52;
+  const FLIP_SPEED = 0.30;                // rad per frame
+
+  const BUMPERS = [
+    {x:120, y:200, r:27, color:"#e94560", label:"Fikapås", pts:50},
+    {x:215, y:145, r:27, color:"#3498db", label:"Siljan", pts:100},
+    {x:305, y:205, r:27, color:"#27ae60", label:"Fjäll", pts:75},
+  ];
+
+  const TARGETS_INIT = [
+    {x:130, y:330, pts:200},
+    {x:210, y:345, pts:200},
+    {x:290, y:330, pts:200},
+  ];
+
+  // Train track: gentle sagging curve the ball can roll on, top of playfield
+  const TRACK_PTS = (()=>{
+    const pts=[];
+    const x0=40, x1=PF_R-124, N=10; // ends well before the lane so the launched ball can come down on the right
+    for(let i=0;i<=N;i++){
+      const t=i/N;
+      const x=x0+(x1-x0)*t;
+      const y=104 - t*10 + Math.sin(t*Math.PI)*4; // gentle downhill toward LEFT so ball rolls off left end
+      pts.push([x,y]);
+    }
+    return pts;
+  })();
+
+  // Static segments: [x1,y1,x2,y2, restitution]
+  function buildSegments(){
+    const segs = [];
+    const E = 0.75;
+    // Train track segments (low restitution = ball rolls, doesn't bounce)
+    for(let i=0;i<TRACK_PTS.length-1;i++){
+      segs.push([TRACK_PTS[i][0],TRACK_PTS[i][1],TRACK_PTS[i+1][0],TRACK_PTS[i+1][1],0.15]);
+    }
+    // Left wall
+    segs.push([WALL, ARCH_CY, WALL, H+50, E]);
+    // Lane inner wall (separates playfield from lane), from below arch to bottom
+    segs.push([PF_R, ARCH_CY+15, PF_R, H+50, E]);
+    // Lane outer wall
+    segs.push([W-WALL, ARCH_CY, W-WALL, H+50, E]);
+    // Funnels down to flippers
+    segs.push([WALL, FY-55, LCX-10, FY-2, E]);
+    segs.push([PF_R, FY-55, RCX+10, FY-2, E]);
+    // Arch: semicircle approximated with segments (open — it IS the top boundary)
+    const N = 20;
+    for(let i=0;i<N;i++){
+      const a1 = Math.PI + (i/N)*Math.PI;
+      const a2 = Math.PI + ((i+1)/N)*Math.PI;
+      segs.push([
+        ARCH_CX + ARCH_R*Math.cos(a1), ARCH_CY + ARCH_R*Math.sin(a1),
+        ARCH_CX + ARCH_R*Math.cos(a2), ARCH_CY + ARCH_R*Math.sin(a2),
+        0.7
+      ]);
+    }
+    return segs;
+  }
+
+  // Slingshot faces: [x1,y1,x2,y2, kickX] — kick toward center
+  const SLING_FACES = [
+    {seg:[88, FY-105, 128, FY-38], kick: 4},
+    {seg:[PF_R-78, FY-105, PF_R-118, FY-38], kick: -4},
+  ];
+
+  function initGame(){
+    return {
+      ball:{x:LANE_X, y:H-65, vx:0, vy:0, r:10},
+      lAngle:L_REST, rAngle:R_REST,
+      lPressed:false, rPressed:false,
+      lOmega:0, rOmega:0,
+      score:0, balls:3, running:false, over:false,
+      launching:true, launchPower:0, launchDir:1,
+      bumperFlash:[0,0,0], slingFlash:[0,0],
+      targets: TARGETS_INIT.map(t=>({...t, hit:false})),
+      msg:"", msgAlpha:0,
+      segments: buildSegments(),
+      stuckFrames:0, lastX:0, lastY:0,
+      trackCooldown:0,
+    };
+  }
+
+  // Collide ball with segment. Returns true if hit.
+  // surfaceVel: optional {x,y} velocity of the surface at contact (for flippers)
+  function collideSegment(b, x1,y1,x2,y2, e, surfVelFn){
+    const dx=x2-x1, dy=y2-y1;
+    const len2=dx*dx+dy*dy;
+    if(len2===0) return false;
+    let t=((b.x-x1)*dx+(b.y-y1)*dy)/len2;
+    t=Math.max(0,Math.min(1,t));
+    const px=x1+t*dx, py=y1+t*dy;
+    let nx=b.x-px, ny=b.y-py;
+    const d=Math.sqrt(nx*nx+ny*ny);
+    const minD = b.r + 3;
+    if(d >= minD || d===0) return false;
+    nx/=d; ny/=d;
+    // Surface velocity at contact
+    let svx=0, svy=0;
+    if(surfVelFn){ const sv=surfVelFn(px,py,t); svx=sv.x; svy=sv.y; }
+    // Relative velocity
+    const rvx=b.vx-svx, rvy=b.vy-svy;
+    const dot=rvx*nx+rvy*ny;
+    if(dot < 0){
+      b.vx -= (1+e)*dot*nx;
+      b.vy -= (1+e)*dot*ny;
+    }
+    // Push out
+    b.x = px + nx*minD;
+    b.y = py + ny*minD;
+    return true;
+  }
+
+  function flipperTip(cx, angle){
+    return {x: cx + FL*Math.cos(angle), y: FY + FL*Math.sin(angle)};
+  }
+
+  function loop(){
+    const g=gRef.current;
+    if(!g||!g.running||g.over) return;
+    const b=g.ball;
+
+    if(g.launching){
+      g.launchPower += 0.045*g.launchDir;
+      if(g.launchPower>=1) g.launchDir=-1;
+      if(g.launchPower<=0) g.launchDir=1;
+      drawFrame(g);
+      rafRef.current=requestAnimationFrame(loop);
+      return;
+    }
+
+    // Update flipper angles
+    const lTarget = g.lPressed ? L_PRESS : L_REST;
+    const rTarget = g.rPressed ? R_PRESS : R_REST;
+    const lPrev = g.lAngle, rPrev = g.rAngle;
+    if(Math.abs(lTarget-g.lAngle) <= FLIP_SPEED) g.lAngle = lTarget;
+    else g.lAngle += Math.sign(lTarget-g.lAngle)*FLIP_SPEED;
+    if(Math.abs(rTarget-g.rAngle) <= FLIP_SPEED) g.rAngle = rTarget;
+    else g.rAngle += Math.sign(rTarget-g.rAngle)*FLIP_SPEED;
+    g.lOmega = g.lAngle - lPrev;
+    g.rOmega = g.rAngle - rPrev;
+
+    // Gravity
+    b.vy += 0.32;
+    // Clamp speed
+    const spd=Math.sqrt(b.vx*b.vx+b.vy*b.vy);
+    if(spd > 17){ b.vx=b.vx/spd*17; b.vy=b.vy/spd*17; }
+
+    // SUBSTEPS: move & collide in 4 small increments — no tunneling
+    const SUB = 4;
+    for(let step=0; step<SUB; step++){
+      b.x += b.vx/SUB;
+      b.y += b.vy/SUB;
+
+      // Static segments
+      for(const s of g.segments){
+        collideSegment(b, s[0],s[1],s[2],s[3], s[4]);
+      }
+
+      // Slingshot faces (with kick)
+      for(let si=0; si<SLING_FACES.length; si++){
+        const sf=SLING_FACES[si];
+        const hit = collideSegment(b, sf.seg[0],sf.seg[1],sf.seg[2],sf.seg[3], 1.15);
+        if(hit){
+          b.vx += sf.kick; b.vy -= 2.5;
+          g.score += 25; g.slingFlash[si]=8;
+          setDisp(d=>({...d,score:g.score}));
+        }
+      }
+
+      // Flippers — segments with surface velocity
+      const lTip = flipperTip(LCX, g.lAngle);
+      collideSegment(b, LCX, FY, lTip.x, lTip.y, 0.55, (px,py,t)=>{
+        // surface vel = omega x r  (perpendicular to arm, scaled by dist from pivot)
+        const dist = t*FL;
+        const perp = {x:-Math.sin(g.lAngle), y:Math.cos(g.lAngle)};
+        const mag = g.lOmega * dist * SUB * 2.4; // scale to ball impulse
+        return {x:perp.x*mag, y:perp.y*mag};
+      });
+      const rTip = flipperTip(RCX, g.rAngle);
+      collideSegment(b, RCX, FY, rTip.x, rTip.y, 0.55, (px,py,t)=>{
+        const dist = t*FL;
+        const perp = {x:-Math.sin(g.rAngle), y:Math.cos(g.rAngle)};
+        const mag = g.rOmega * dist * SUB * 2.4;
+        return {x:perp.x*mag, y:perp.y*mag};
+      });
+
+      // Bumpers
+      for(let bi=0;bi<BUMPERS.length;bi++){
+        const bmp=BUMPERS[bi];
+        const dx=b.x-bmp.x, dy=b.y-bmp.y;
+        const dist=Math.sqrt(dx*dx+dy*dy);
+        if(dist < b.r+bmp.r && dist>0){
+          const nx=dx/dist, ny=dy/dist;
+          b.x=bmp.x+nx*(b.r+bmp.r+1);
+          b.y=bmp.y+ny*(b.r+bmp.r+1);
+          // Pop: strong outward impulse
+          b.vx = nx*9; b.vy = ny*9;
+          g.score+=bmp.pts; g.bumperFlash[bi]=10;
+          g.msg=bmp.label+"! +"+bmp.pts; g.msgAlpha=1;
+          setDisp(d=>({...d,score:g.score}));
+        }
+      }
+
+      // Targets
+      for(const t of g.targets){
+        if(t.hit)continue;
+        if(Math.abs(b.x-t.x)<17 && Math.abs(b.y-t.y)<14){
+          t.hit=true;
+          b.vy = Math.abs(b.vy) < 3 ? 3 : Math.abs(b.vy);
+          g.score+=t.pts; g.msg="Mål! +"+t.pts; g.msgAlpha=1;
+          setDisp(d=>({...d,score:g.score}));
+          if(g.targets.every(t2=>t2.hit)){
+            g.score+=500; g.msg="BONUS +500! 🎉"; g.msgAlpha=1.5;
+            setTimeout(()=>{if(gRef.current)gRef.current.targets.forEach(t2=>t2.hit=false);},700);
+            setDisp(d=>({...d,score:g.score}));
+          }
+        }
+      }
+    }
+
+    // Train track ride bonus
+    if(g.trackCooldown>0) g.trackCooldown--;
+    const trackMid=TRACK_PTS[Math.floor(TRACK_PTS.length/2)];
+    if(g.trackCooldown===0 && Math.abs(b.x-trackMid[0])<20 && Math.abs(b.y-(trackMid[1]-b.r-4))<10){
+      g.score+=150; g.msg="Tågresa! +150 🚂"; g.msgAlpha=1.2;
+      g.trackCooldown=180;
+      setDisp(d=>({...d,score:g.score}));
+    }
+
+    // Rolling friction
+    b.vx *= 0.998;
+
+    // Ball fell back down launcher lane — reload spring
+    if(b.x > PF_R && b.y > H-75 && Math.abs(b.vy) < 1.5){
+      g.launching=true; g.launchPower=0; g.launchDir=1;
+      b.x=LANE_X; b.y=H-65; b.vx=0; b.vy=0;
+      setDisp(d=>({...d,launching:true}));
+    }
+
+    // Drain (only from playfield)
+    if(b.y > H+35 && b.x <= PF_R){
+      g.balls--;
+      if(g.balls<=0){
+        g.over=true; g.running=false;
+        if(!scoredRef.current){onScore(Math.floor(g.score/50));scoredRef.current=true;}
+        setDisp(d=>({...d,balls:0,over:true}));
+      } else {
+        b.x=LANE_X; b.y=H-65; b.vx=0; b.vy=0;
+        g.launching=true; g.launchPower=0; g.launchDir=1;
+        setDisp(d=>({...d,balls:g.balls,launching:true}));
+      }
+    }
+
+    // Anti-stuck
+    const moved=Math.abs(b.x-g.lastX)+Math.abs(b.y-g.lastY);
+    if(moved<0.6){
+      g.stuckFrames++;
+      if(g.stuckFrames>45){
+        b.vx=(b.x>(PF_R+WALL)/2?-1:1)*3+(Math.random()-0.5)*2;
+        b.vy=-5;
+        g.stuckFrames=0;
+      }
+    } else g.stuckFrames=0;
+    g.lastX=b.x; g.lastY=b.y;
+
+    g.bumperFlash=g.bumperFlash.map(f=>Math.max(0,f-1));
+    g.slingFlash=g.slingFlash.map(f=>Math.max(0,f-1));
+    if(g.msgAlpha>0)g.msgAlpha-=0.018;
+
+    drawFrame(g);
+    rafRef.current=requestAnimationFrame(loop);
+  }
+
+  function drawFrame(g){
+    const cv=canvasRef.current; if(!cv)return;
+    const ctx=cv.getContext("2d");
+    const b=g.ball;
+
+    ctx.fillStyle="#2d5a27"; ctx.fillRect(0,0,W,H);
+
+    // Decorative road "genom Sverige"
+    ctx.beginPath();
+    ctx.moveTo(LCX,H-55); ctx.lineTo(95,410); ctx.lineTo(70,300);
+    ctx.lineTo(110,215); ctx.lineTo(215,170); ctx.lineTo(300,230);
+    ctx.lineTo(280,330); ctx.lineTo(RCX,H-55);
+    ctx.strokeStyle="#4a4a4a"; ctx.lineWidth=38; ctx.lineCap="round"; ctx.lineJoin="round"; ctx.stroke();
+    ctx.strokeStyle="#6a6a6a"; ctx.lineWidth=32; ctx.stroke();
+    ctx.setLineDash([12,10]); ctx.strokeStyle="#ffffffcc"; ctx.lineWidth=3; ctx.stroke(); ctx.setLineDash([]);
+    // Towns along the road
+    const towns=[[LCX+4,H-70,"Malmö"],[76,315,"Ystad"],[210,185,"Simrishamn"],[RCX-4,H-70,"Järrestad"]];
+    for(const [tx,ty,name] of towns){
+      ctx.beginPath(); ctx.arc(tx,ty,4,0,Math.PI*2);
+      ctx.fillStyle="#ffe066"; ctx.fill();
+      ctx.strokeStyle="#8B4513"; ctx.lineWidth=1.5; ctx.stroke();
+      ctx.fillStyle="#fff"; ctx.font="bold 9px sans-serif"; ctx.textAlign="center";
+      ctx.fillText(name,tx,ty-8);
+    }
+    // Nature decorations
+    ctx.font="14px sans-serif"; ctx.textAlign="left";
+    ctx.fillText("🌲",55,240); ctx.fillText("🌲",330,300); ctx.fillText("🌊",250,300);
+    ctx.fillText("⛰️",90,170);
+
+    // Train track (railway) — chunky and visible
+    // Ballast bed (gravel)
+    ctx.beginPath();
+    for(let i=0;i<TRACK_PTS.length;i++){
+      const [x,y]=TRACK_PTS[i];
+      if(i===0) ctx.moveTo(x,y+4); else ctx.lineTo(x,y+4);
+    }
+    ctx.strokeStyle="#7a6a55"; ctx.lineWidth=18; ctx.lineCap="round"; ctx.stroke();
+    // Sleepers
+    ctx.strokeStyle="#5a3a1a"; ctx.lineWidth=4;
+    for(let i=0;i<TRACK_PTS.length-1;i++){
+      const [x,y]=TRACK_PTS[i];
+      const [x2,y2]=TRACK_PTS[i+1];
+      for(const frac of [0.25,0.75]){
+        const mx=x+(x2-x)*frac, my=y+(y2-y)*frac;
+        const dx=x2-x, dy=y2-y, len=Math.sqrt(dx*dx+dy*dy);
+        const nx=-dy/len, ny=dx/len;
+        ctx.beginPath();
+        ctx.moveTo(mx+nx*9,my+ny*9+3); ctx.lineTo(mx-nx*9,my-ny*9+3);
+        ctx.stroke();
+      }
+    }
+    // Rails
+    for(const off of [-4,4]){
+      ctx.beginPath();
+      for(let i=0;i<TRACK_PTS.length;i++){
+        const [x,y]=TRACK_PTS[i];
+        if(i===0) ctx.moveTo(x,y+off); else ctx.lineTo(x,y+off);
+      }
+      ctx.strokeStyle="#d8d8e0"; ctx.lineWidth=3; ctx.stroke();
+      ctx.strokeStyle="#888"; ctx.lineWidth=1; ctx.stroke();
+    }
+    // Train at right end (where ball lands), station sign at left
+    ctx.font="20px sans-serif"; ctx.textAlign="center";
+    ctx.fillText("🚂",TRACK_PTS[TRACK_PTS.length-1][0]+4,TRACK_PTS[TRACK_PTS.length-1][1]-10);
+    ctx.font="bold 8px sans-serif"; ctx.fillStyle="#ffe066";
+    ctx.fillText("PÅGATÅGET",(TRACK_PTS[0][0]+TRACK_PTS[TRACK_PTS.length-1][0])/2,TRACK_PTS[0][1]-14);
+
+    // Arch wall
+    ctx.beginPath();
+    ctx.arc(ARCH_CX, ARCH_CY, ARCH_R+6, Math.PI, 2*Math.PI);
+    ctx.strokeStyle="#8B4513"; ctx.lineWidth=14; ctx.stroke();
+
+    // Lane
+    ctx.fillStyle="#1a2a1a"; ctx.fillRect(PF_R,ARCH_CY+15,LANE_W,H-ARCH_CY-15);
+    ctx.fillStyle="#243a24"; ctx.fillRect(PF_R+3,ARCH_CY+17,LANE_W-6,H-ARCH_CY-19);
+    ctx.fillStyle="#8B4513"; ctx.fillRect(PF_R-2,ARCH_CY+15,4,H-ARCH_CY-15);
+    if(g.launching){
+      const springH=45*g.launchPower;
+      ctx.fillStyle="#f5a623"; ctx.fillRect(LANE_X-9,H-40-springH,18,springH+6);
+      ctx.fillStyle="#ffe066"; ctx.fillRect(LANE_X-11,H-44-springH,22,5);
+    }
+
+    // Outer walls
+    ctx.fillStyle="#8B4513";
+    ctx.fillRect(0,ARCH_CY-10,WALL,H); ctx.fillRect(W-WALL,ARCH_CY-10,WALL,H);
+
+    // Funnels
+    ctx.beginPath(); ctx.moveTo(WALL,FY-55); ctx.lineTo(LCX-10,FY-2);
+    ctx.strokeStyle="#8B4513"; ctx.lineWidth=10; ctx.lineCap="round"; ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(PF_R,FY-55); ctx.lineTo(RCX+10,FY-2); ctx.stroke();
+
+    // Slingshots
+    for(let si=0;si<SLING_FACES.length;si++){
+      const sf=SLING_FACES[si]; const flash=g.slingFlash[si]>0;
+      const [x1,y1,x2,y2]=sf.seg;
+      // triangle: face + vertical back edge
+      const backX = si===0 ? x1 : x1;
+      ctx.beginPath();
+      ctx.moveTo(x1,y1); ctx.lineTo(x2,y2); ctx.lineTo(x1,y2); ctx.closePath();
+      ctx.fillStyle=flash?"#ffe066":"#f5a623"; ctx.fill();
+      ctx.strokeStyle=flash?"#fff":"#ffcc44"; ctx.lineWidth=3; ctx.stroke();
+    }
+
+    // Targets
+    for(const t of g.targets){
+      ctx.beginPath(); ctx.rect(t.x-13,t.y-7,26,14);
+      ctx.fillStyle=t.hit?"#2a2a2a":"#e91e63"; ctx.fill();
+      ctx.strokeStyle=t.hit?"#444":"#ff80ab"; ctx.lineWidth=2; ctx.stroke();
+      if(!t.hit){ctx.fillStyle="#fff";ctx.font="bold 8px sans-serif";ctx.textAlign="center";ctx.fillText("200",t.x,t.y+3);}
+    }
+
+    // Bumpers
+    for(let bi=0;bi<BUMPERS.length;bi++){
+      const bmp=BUMPERS[bi]; const flash=g.bumperFlash[bi]>0;
+      ctx.beginPath(); ctx.arc(bmp.x,bmp.y,bmp.r+5,0,Math.PI*2);
+      ctx.fillStyle=flash?"#fff6":"#0003"; ctx.fill();
+      ctx.beginPath(); ctx.arc(bmp.x,bmp.y,bmp.r,0,Math.PI*2);
+      const gr=ctx.createRadialGradient(bmp.x-6,bmp.y-7,3,bmp.x,bmp.y,bmp.r);
+      gr.addColorStop(0,flash?"#fff":bmp.color); gr.addColorStop(1,flash?bmp.color:bmp.color+"99");
+      ctx.fillStyle=gr; ctx.fill();
+      ctx.strokeStyle="#fff9"; ctx.lineWidth=2; ctx.stroke();
+      ctx.fillStyle="#fff"; ctx.font="bold 9px sans-serif"; ctx.textAlign="center";
+      ctx.fillText(bmp.label,bmp.x,bmp.y+3);
+    }
+
+    // Flippers
+    [["l",LCX,g.lAngle,g.lPressed],["r",RCX,g.rAngle,g.rPressed]].forEach(([s,cx,ang,pressed])=>{
+      const tip=flipperTip(cx,ang);
+      ctx.beginPath(); ctx.moveTo(cx,FY+2); ctx.lineTo(tip.x,tip.y+2);
+      ctx.strokeStyle="#0005"; ctx.lineWidth=FW+3; ctx.lineCap="round"; ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(cx,FY); ctx.lineTo(tip.x,tip.y);
+      ctx.strokeStyle=pressed?"#2ecc71":"#27ae60"; ctx.lineWidth=FW; ctx.lineCap="round"; ctx.stroke();
+      ctx.beginPath(); ctx.arc(cx,FY,8,0,Math.PI*2);
+      ctx.fillStyle="#1a5a2a"; ctx.fill(); ctx.strokeStyle="#fff5"; ctx.lineWidth=1.5; ctx.stroke();
+    });
+
+    // Ball
+    ctx.beginPath(); ctx.arc(b.x,b.y,b.r,0,Math.PI*2);
+    const bg2=ctx.createRadialGradient(b.x-3,b.y-4,1,b.x,b.y,b.r);
+    bg2.addColorStop(0,"#ffffff"); bg2.addColorStop(0.4,"#d0d0d8"); bg2.addColorStop(1,"#707080");
+    ctx.fillStyle=bg2; ctx.fill();
+
+    // HUD
+    ctx.fillStyle="#000b"; ctx.fillRect(WALL,8,W-2*WALL,32);
+    ctx.fillStyle="#ffe066"; ctx.font="bold 12px sans-serif"; ctx.textAlign="left";
+    ctx.fillText("🚗 Roadtrip Äventyr", WALL+6,22);
+    ctx.fillStyle="#fff"; ctx.font="bold 14px sans-serif"; ctx.textAlign="right";
+    ctx.fillText("⭐ "+g.score, W-WALL-6,22);
+    ctx.textAlign="left"; ctx.font="13px sans-serif";
+    ctx.fillText("🚗".repeat(Math.max(0,g.balls)),WALL+6,37);
+
+    if(g.launching){
+      ctx.save(); ctx.translate(LANE_X,H/2-20); ctx.rotate(-Math.PI/2);
+      ctx.fillStyle="#ffe066"; ctx.font="bold 10px sans-serif"; ctx.textAlign="center";
+      ctx.fillText("TRYCK SKJUT →",0,3); ctx.restore();
+    }
+
+    if(g.msgAlpha>0&&g.msg){
+      ctx.globalAlpha=Math.min(1,g.msgAlpha);
+      ctx.font="bold 20px sans-serif"; ctx.textAlign="center";
+      ctx.fillStyle="#000"; ctx.fillText(g.msg,(PF_R+WALL)/2+1,H/2+1);
+      ctx.fillStyle="#ffe066"; ctx.fillText(g.msg,(PF_R+WALL)/2,H/2);
+      ctx.globalAlpha=1;
+    }
+
+    ctx.font="20px sans-serif"; ctx.textAlign="left"; ctx.fillText("🐴",WALL+8,H-30);
+    ctx.textAlign="right"; ctx.fillText("🇸🇪",PF_R-10,H-30);
+  }
+
+  function launch(){
+    const g=gRef.current; if(!g||!g.launching)return;
+    g.ball.vy = -(14+g.launchPower*4);
+    g.ball.vx = 0;
+    g.launching=false;
+    setDisp(d=>({...d,launching:false}));
+  }
+
+  function start(){
+    if(rafRef.current)cancelAnimationFrame(rafRef.current);
+    gRef.current=initGame();
+    gRef.current.running=true;
+    scoredRef.current=false;
+    setDisp({score:0,balls:3,over:false,started:true,launching:true});
+    rafRef.current=requestAnimationFrame(loop);
+  }
+
+  useEffect(()=>()=>{if(rafRef.current)cancelAnimationFrame(rafRef.current);},[]);
+
+  const isLaunching=disp.launching&&disp.started&&!disp.over;
+
+  return(
+    <div style={{textAlign:"center"}}>
+      <canvas ref={canvasRef} width={W} height={H}
+        style={{width:"100%",maxWidth:W,borderRadius:16,border:"3px solid #8B4513",display:"block",margin:"0 auto 10px",touchAction:"none",boxShadow:"0 4px 24px #0008"}}/>
+      {disp.over&&<div style={{fontFamily:theme.font,color:theme.accent,fontSize:20,marginBottom:8}}>Game Over! {disp.score} poäng</div>}
+      {(!disp.started||disp.over)
+        ?<button onClick={start} style={btnStyle(theme.gold)}>🚗 {disp.over?"Kör igen!":"Starta Roadtrip!"}</button>
+        :<div style={{display:"flex",gap:6,marginTop:4}}>
+          <button
+            onTouchStart={(e)=>{e.preventDefault();if(gRef.current)gRef.current.lPressed=true;}}
+            onTouchEnd={(e)=>{e.preventDefault();if(gRef.current)gRef.current.lPressed=false;}}
+            onTouchCancel={(e)=>{e.preventDefault();if(gRef.current)gRef.current.lPressed=false;}}
+            onMouseDown={()=>{if(gRef.current)gRef.current.lPressed=true;}}
+            onMouseUp={()=>{if(gRef.current)gRef.current.lPressed=false;}}
+            style={{flex:1,height:72,borderRadius:14,background:"linear-gradient(135deg,#27ae60,#2ecc71)",border:"none",color:"#fff",fontFamily:theme.font,fontSize:18,cursor:"pointer",touchAction:"none",opacity:isLaunching?0.4:1}}>
+            ◀ VÄNSTER
+          </button>
+          <button
+            onTouchStart={(e)=>{e.preventDefault();if(isLaunching)launch();else if(gRef.current)gRef.current.rPressed=true;}}
+            onTouchEnd={(e)=>{e.preventDefault();if(gRef.current)gRef.current.rPressed=false;}}
+            onTouchCancel={(e)=>{e.preventDefault();if(gRef.current)gRef.current.rPressed=false;}}
+            onMouseDown={()=>{if(isLaunching)launch();else if(gRef.current)gRef.current.rPressed=true;}}
+            onMouseUp={()=>{if(gRef.current)gRef.current.rPressed=false;}}
+            style={{flex:1,height:72,borderRadius:14,background:isLaunching?"linear-gradient(135deg,#f5a623,#e67e22)":"linear-gradient(135deg,#27ae60,#2ecc71)",border:"none",color:"#fff",fontFamily:theme.font,fontSize:18,cursor:"pointer",touchAction:"none"}}>
+            {isLaunching?"🚀 SKJUT!":"HÖGER ▶"}
+          </button>
+        </div>
+      }
+    </div>
+  );
+}
+
 // ===== PLAYER SETUP =====
 function PlayerSetup({onDone,highscores}){
   const [name,setName]=useState("");
@@ -1124,6 +2090,9 @@ function App(){
     snake:    <SnakeGame     onScore={p=>addScore("snake",p)}/>,
     tetris:   <TetrisGame    onScore={p=>addScore("tetris",p)}/>,
     bingo:    <BingoGame     onScore={p=>addScore("bingo",p)}/>,
+    ubongo:   <UbongoGame    onScore={p=>addScore("ubongo",p)}/>,
+    battleship:<BattleshipGame onScore={p=>addScore("battleship",p)}/>,
+    flipper:  <FlipperGame   onScore={p=>addScore("flipper",p)}/>,
   };
 
   const gameInfo=games.find(g=>g.id===screen);
